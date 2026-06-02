@@ -13,6 +13,7 @@ import (
 	"incidentiq/apps/api/internal/httpapi"
 	"incidentiq/apps/api/internal/platform/db"
 	"incidentiq/apps/api/internal/platform/redisx"
+	"incidentiq/apps/api/internal/tickettemplate"
 )
 
 func main() {
@@ -34,6 +35,20 @@ func main() {
 		log.Fatalf("redis open error: %v", err)
 	}
 	defer redisClient.Close()
+
+	if cfg.TicketTemplatePath != "" {
+		raw, doc, validationErrors, err := tickettemplate.LoadFile(cfg.TicketTemplatePath)
+		if err != nil {
+			log.Fatalf("ticket template load error: %v", err)
+		}
+		if len(validationErrors) > 0 {
+			log.Fatalf("ticket template validation errors: %v", validationErrors)
+		}
+		if err := tickettemplate.NewRepository(pool).SaveDocument(ctx, raw, doc, "startup"); err != nil {
+			log.Fatalf("ticket template save error: %v", err)
+		}
+		log.Printf("loaded ticket template version %d from %s", doc.Version, cfg.TicketTemplatePath)
+	}
 
 	srv := httpapi.New(cfg, pool, redisClient)
 	httpServer := &http.Server{

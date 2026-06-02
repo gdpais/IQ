@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS teams (
 
 CREATE TABLE IF NOT EXISTS deployments (
   id TEXT PRIMARY KEY,
+  incident_id TEXT NULL REFERENCES incidents(id) ON DELETE SET NULL,
   service TEXT NOT NULL,
   environment TEXT NOT NULL,
   version TEXT NOT NULL,
@@ -127,4 +128,6 @@ CREATE INDEX IF NOT EXISTS idx_incident_events_incident_id ON incident_events(in
 CREATE INDEX IF NOT EXISTS idx_alerts_incident_id ON alerts(incident_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_source_event ON alerts(source, source_event_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_correlation ON alerts(source, fingerprint, service, environment, severity, observed_at);
+CREATE INDEX IF NOT EXISTS idx_deployments_incident_id ON deployments(incident_id);
+CREATE INDEX IF NOT EXISTS idx_deployments_lookup ON deployments(service, environment, deployed_at);
 CREATE INDEX IF NOT EXISTS idx_integration_events_retry ON integration_events(next_retry_at);

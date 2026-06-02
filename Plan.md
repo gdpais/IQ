@@ -27,6 +27,13 @@ The MVP excludes playbooks and recovery execution. It focuses on automated incid
   - Required services: PostgreSQL and Redis.
   - Secrets/config for JIRA, Dynatrace, ELK, webhook signing, database, and Redis.
 
+- Security and reliability:
+  - API token authentication can be enabled for non-webhook endpoints.
+  - RBAC roles gate read, responder, commander, and admin operations.
+  - Webhooks use HMAC-SHA256 request signatures when source secrets are configured.
+  - Redis-backed fixed-window rate limits protect API and webhook ingress.
+  - Security-sensitive actions are recorded in `audit_log`.
+
 ## Core Capabilities
 
 - Incident register:
@@ -85,6 +92,8 @@ The MVP excludes playbooks and recovery execution. It focuses on automated incid
   - `GET /reports/dora`
   - `GET /reports/executive`
   - `GET /metrics/live`
+  - `GET /reports/snapshots`
+  - `POST /reports/snapshots/materialize`
   - `GET /exports/incidents.csv`
 
 - Template/config API:

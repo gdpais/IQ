@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestPriorityForSeverity(t *testing.T) {
 	tests := map[string]string{
@@ -75,5 +78,58 @@ func TestResolutionFieldValue(t *testing.T) {
 	}
 	if custom := resolutionFieldValue("customfield_123", "Resolved by IncidentIQ"); custom != "Resolved by IncidentIQ" {
 		t.Fatalf("custom resolution field = %#v", custom)
+	}
+}
+
+func TestComputeDORAReportForSnapshots(t *testing.T) {
+	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	resolved := now.Add(-15 * time.Minute)
+	report := computeDORAReport([]reportMetricRow{
+		{
+			ID:                    "inc-1",
+			StartedAt:             now.Add(-45 * time.Minute),
+			ResolvedAt:            &resolved,
+			LinkedDeploymentCount: 1,
+		},
+	}, 5, now)
+
+	if report.DeploymentLinkedIncidents != 1 {
+		t.Fatalf("DeploymentLinkedIncidents = %d", report.DeploymentLinkedIncidents)
+	}
+	if report.ChangeFailureRate != 0.2 {
+		t.Fatalf("ChangeFailureRate = %f", report.ChangeFailureRate)
+	}
+	if report.TimeToRestoreServiceSeconds == nil || *report.TimeToRestoreServiceSeconds != 1800 {
+		t.Fatalf("TimeToRestoreServiceSeconds = %#v", report.TimeToRestoreServiceSeconds)
+	}
+}
+
+func TestComputeLiveMetricsForSnapshots(t *testing.T) {
+	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	firstAlert := now.Add(-70 * time.Minute)
+	ack := now.Add(-50 * time.Minute)
+	metrics := computeLiveMetrics([]reportMetricRow{
+		{
+			ID:                   "inc-1",
+			Severity:             "critical",
+			Service:              "checkout",
+			Environment:          "prod",
+			OwnerTeam:            "sre",
+			Status:               "acknowledged",
+			StartedAt:            now.Add(-60 * time.Minute),
+			AcknowledgedAt:       &ack,
+			FirstAlertObservedAt: &firstAlert,
+			AlertCount:           3,
+		},
+	}, now)
+
+	if metrics.IncidentCount != 1 || metrics.AlertCount != 3 {
+		t.Fatalf("metrics = %#v", metrics)
+	}
+	if metrics.DuplicateSuppressionCount != 2 {
+		t.Fatalf("DuplicateSuppressionCount = %d", metrics.DuplicateSuppressionCount)
+	}
+	if metrics.MeanTimeToDetectSeconds == nil || *metrics.MeanTimeToDetectSeconds != 600 {
+		t.Fatalf("MTTD = %#v", metrics.MeanTimeToDetectSeconds)
 	}
 }

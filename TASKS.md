@@ -78,83 +78,83 @@ This backlog is derived from the approved MVP plan and is organized for phased e
 - [x] Implement retryable integration events in `integration_events`.
 - [x] Implement worker retry pipeline using Redis-backed job coordination.
 
-- [ ] Implement YAML ticket template loader and versioning.
-- [ ] Implement template validation endpoint: `POST /ticket-templates/validate`.
-- [ ] Implement template preview endpoint: `POST /ticket-templates/preview`.
-- [ ] Implement template retrieval endpoint: `GET /ticket-templates`.
-- [ ] Support template scopes: global default + service/team/severity overrides.
-- [ ] Support simple variables only:
-  - [ ] `{{severity}}`
-  - [ ] `{{service}}`
-  - [ ] `{{environment}}`
-  - [ ] `{{incident_id}}`
-  - [ ] `{{started_at}}`
-  - [ ] `{{summary}}`
-  - [ ] `{{alert_count}}`
-  - [ ] `{{dashboard_url}}`
+- [x] Implement YAML ticket template loader and versioning.
+- [x] Implement template validation endpoint: `POST /ticket-templates/validate`.
+- [x] Implement template preview endpoint: `POST /ticket-templates/preview`.
+- [x] Implement template retrieval endpoint: `GET /ticket-templates`.
+- [x] Support template scopes: global default + service/team/severity overrides.
+- [x] Support simple variables only:
+  - [x] `{{severity}}`
+  - [x] `{{service}}`
+  - [x] `{{environment}}`
+  - [x] `{{incident_id}}`
+  - [x] `{{started_at}}`
+  - [x] `{{summary}}`
+  - [x] `{{alert_count}}`
+  - [x] `{{dashboard_url}}`
 
 ### Acceptance criteria
 
 - [ ] New incidents create exactly one JIRA ticket when integration is enabled.
 - [ ] Subsequent incident updates sync to existing JIRA issue without duplicates.
-- [ ] Template validation catches unknown variables and invalid override structure.
+- [x] Template validation catches unknown variables and invalid override structure.
 - [ ] JIRA outage produces retryable events without losing IncidentIQ source-of-truth state.
 
 ## Phase 5 - Reporting and Metrics Engine
 
-- [ ] Implement metrics computation from incident lifecycle and event timestamps.
-- [ ] Implement live metrics endpoint: `GET /metrics/live`.
-- [ ] Implement report endpoints:
-  - [ ] `GET /reports/sre`
-  - [ ] `GET /reports/dora`
-  - [ ] `GET /reports/executive`
-- [ ] Implement deployment ingestion endpoint: `POST /webhooks/deployments`.
-- [ ] Implement deployment-to-incident linking logic for DORA metrics.
-- [ ] Implement report snapshot/materialization jobs for dashboard performance.
-- [ ] Implement CSV export endpoint: `GET /exports/incidents.csv`.
+- [x] Implement metrics computation from incident lifecycle and event timestamps.
+- [x] Implement live metrics endpoint: `GET /metrics/live`.
+- [x] Implement report endpoints:
+  - [x] `GET /reports/sre`
+  - [x] `GET /reports/dora`
+  - [x] `GET /reports/executive`
+- [x] Implement deployment ingestion endpoint: `POST /webhooks/deployments`.
+- [x] Implement deployment-to-incident linking logic for DORA metrics.
+- [x] Implement report snapshot/materialization jobs for dashboard performance.
+- [x] Implement CSV export endpoint: `GET /exports/incidents.csv`.
 
 ### MVP metric set
 
-- [ ] SRE: MTTD, MTTA, MTTR, incident count, reopen rate, SLA impact, alert-to-incident conversion, duplicate suppression.
-- [ ] DORA-adjacent: deployment-linked incidents, change failure rate, time to restore service.
-- [ ] Executive: downtime, SLA breach/at-risk count, reliability trends, severity trends, business impact rollups.
+- [x] SRE: MTTD, MTTA, MTTR, incident count, reopen rate, SLA impact, alert-to-incident conversion, duplicate suppression.
+- [x] DORA-adjacent: deployment-linked incidents, change failure rate, time to restore service.
+- [x] Executive: downtime, SLA breach/at-risk count, reliability trends, severity trends, business impact rollups.
 
 ### Acceptance criteria
 
-- [ ] Metrics match controlled fixture scenarios.
-- [ ] Dashboard and CSV exports show consistent totals for equivalent filters.
-- [ ] DORA metrics populate when deployment events are present.
+- [x] Metrics match controlled fixture scenarios.
+- [x] Dashboard and CSV exports show consistent totals for equivalent filters.
+- [x] DORA metrics populate when deployment events are present.
 
 ## Phase 6 - Frontend Operator Experience
 
-- [ ] Build incident register view with filtering and sorting.
-- [ ] Build incident detail view with timeline, lifecycle actions, linked alerts, JIRA link, audit trail.
-- [ ] Build reporting dashboards (SRE, DORA, Executive) with time-range and dimension filters.
-- [ ] Build integration status/config surfaces and test action UI.
-- [ ] Build ticket template preview/validation UI.
-- [ ] Build error, loading, and empty states across all major screens.
+- [x] Build incident register view with filtering and sorting.
+- [x] Build incident detail view with timeline, lifecycle actions, linked alerts, JIRA link, audit trail.
+- [x] Build reporting dashboards (SRE, DORA, Executive) with time-range and dimension filters.
+- [x] Build integration status/config surfaces and test action UI.
+- [x] Build ticket template preview/validation UI.
+- [x] Build error, loading, and empty states across all major screens.
 
 ### Acceptance criteria
 
 - [ ] Operators can run end-to-end incident workflows from the UI.
-- [ ] Reporting views update from backend data without manual refresh assumptions.
-- [ ] Template preview is usable before enabling config changes.
+- [x] Reporting views update from backend data without manual refresh assumptions.
+- [x] Template preview is usable before enabling config changes.
 
 ## Phase 7 - Security, Reliability, and Ops Hardening
 
-- [ ] Add webhook authentication/signature verification.
-- [ ] Add API authentication and RBAC enforcement across endpoints.
-- [ ] Add audit logging for security-sensitive actions and config changes.
-- [ ] Add rate limits and abuse controls on webhook/API ingress.
-- [ ] Add backup/restore procedure for PostgreSQL and config versions.
-- [ ] Add runbooks for service failure, JIRA outage, Redis outage, and DB failover.
-- [ ] Add Redis license/legal checkpoint to release checklist.
+- [x] Add webhook authentication/signature verification.
+- [x] Add API authentication and RBAC enforcement across endpoints.
+- [x] Add audit logging for security-sensitive actions and config changes.
+- [x] Add rate limits and abuse controls on webhook/API ingress.
+- [x] Add backup/restore procedure for PostgreSQL and config versions.
+- [x] Add runbooks for service failure, JIRA outage, Redis outage, and DB failover.
+- [x] Add Redis license/legal checkpoint to release checklist.
 
 ### Acceptance criteria
 
-- [ ] Unauthorized actions are blocked and auditable.
-- [ ] Integration outages degrade gracefully with retry and operator visibility.
-- [ ] Release checklist includes legal review for Redis usage.
+- [x] Unauthorized actions are blocked and auditable.
+- [x] Integration outages degrade gracefully with retry and operator visibility.
+- [x] Release checklist includes legal review for Redis usage.
 
 ## Phase 8 - Testing and Release Readiness
 
@@ -164,7 +164,7 @@ This backlog is derived from the approved MVP plan and is organized for phased e
 - [ ] Add end-to-end tests for dashboard/report consistency and CSV exports.
 - [ ] Add performance smoke tests for high-volume alert ingestion.
 - [ ] Add CI pipeline gates for lint, unit, integration test suites.
-- [ ] Define MVP release checklist and sign-off criteria.
+- [x] Define MVP release checklist and sign-off criteria.
 
 ### Acceptance criteria
 

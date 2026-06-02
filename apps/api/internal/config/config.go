@@ -3,17 +3,22 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 )
 
 type Config struct {
-	Port      string
-	DBURL     string
-	RedisAddr string
-	RedisDB   string
-	JIRA      JIRAConfig
-	Dynatrace SourceConfig
-	ELK       SourceConfig
-	Webhooks  WebhookConfig
+	Port               string
+	DBURL              string
+	RedisAddr          string
+	RedisDB            string
+	TicketTemplatePath string
+	CORSAllowedOrigins string
+	APIAuthToken       string
+	RateLimit          RateLimitConfig
+	JIRA               JIRAConfig
+	Dynatrace          SourceConfig
+	ELK                SourceConfig
+	Webhooks           WebhookConfig
 }
 
 type JIRAConfig struct {
@@ -34,17 +39,30 @@ type SourceConfig struct {
 }
 
 type WebhookConfig struct {
-	DynatraceSecret string
-	ELKSecret       string
-	GenericSecret   string
+	DynatraceSecret  string
+	ELKSecret        string
+	GenericSecret    string
+	DeploymentSecret string
+}
+
+type RateLimitConfig struct {
+	APIRequestsPerMinute     int
+	WebhookRequestsPerMinute int
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Port:      getEnv("PORT", "8080"),
-		DBURL:     os.Getenv("DATABASE_URL"),
-		RedisAddr: getEnv("REDIS_ADDR", "localhost:6379"),
-		RedisDB:   getEnv("REDIS_DB", "0"),
+		Port:               getEnv("PORT", "8080"),
+		DBURL:              os.Getenv("DATABASE_URL"),
+		RedisAddr:          getEnv("REDIS_ADDR", "localhost:6379"),
+		RedisDB:            getEnv("REDIS_DB", "0"),
+		TicketTemplatePath: os.Getenv("TICKET_TEMPLATE_PATH"),
+		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"),
+		APIAuthToken:       os.Getenv("API_AUTH_TOKEN"),
+		RateLimit: RateLimitConfig{
+			APIRequestsPerMinute:     getIntEnv("RATE_LIMIT_API_PER_MINUTE", 600),
+			WebhookRequestsPerMinute: getIntEnv("RATE_LIMIT_WEBHOOK_PER_MINUTE", 120),
+		},
 		JIRA: JIRAConfig{
 			Enabled:                 getBoolEnv("JIRA_ENABLED", false),
 			BaseURL:                 os.Getenv("JIRA_BASE_URL"),
@@ -64,9 +82,10 @@ func Load() (Config, error) {
 			Enabled: getBoolEnv("ELK_ENABLED", true),
 		},
 		Webhooks: WebhookConfig{
-			DynatraceSecret: os.Getenv("DYNATRACE_WEBHOOK_SECRET"),
-			ELKSecret:       os.Getenv("ELK_WEBHOOK_SECRET"),
-			GenericSecret:   os.Getenv("GENERIC_WEBHOOK_SECRET"),
+			DynatraceSecret:  os.Getenv("DYNATRACE_WEBHOOK_SECRET"),
+			ELKSecret:        os.Getenv("ELK_WEBHOOK_SECRET"),
+			GenericSecret:    os.Getenv("GENERIC_WEBHOOK_SECRET"),
+			DeploymentSecret: os.Getenv("DEPLOYMENT_WEBHOOK_SECRET"),
 		},
 	}
 
@@ -105,4 +124,16 @@ func getBoolEnv(key string, fallback bool) bool {
 		return fallback
 	}
 	return v == "1" || v == "true" || v == "TRUE" || v == "yes" || v == "YES"
+}
+
+func getIntEnv(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return fallback
+	}
+	return n
 }
