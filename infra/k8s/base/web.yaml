@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incidentiq-web
+  namespace: incidentiq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: incidentiq-web
+  template:
+    metadata:
+      labels:
+        app: incidentiq-web
+    spec:
+      containers:
+        - name: web
+          image: incidentiq/web:dev
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: incidentiq-web
+  namespace: incidentiq
+spec:
+  selector:
+    app: incidentiq-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80

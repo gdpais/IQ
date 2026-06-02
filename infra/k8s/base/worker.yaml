@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incidentiq-worker
+  namespace: incidentiq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: incidentiq-worker
+  template:
+    metadata:
+      labels:
+        app: incidentiq-worker
+    spec:
+      containers:
+        - name: worker
+          image: incidentiq/worker:dev
+          envFrom:
+            - configMapRef:
+                name: incidentiq-config
+            - secretRef:
+                name: incidentiq-secrets

@@ -1,0 +1,14 @@
+{
+  "name": "incidentiq",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "build": "(cd apps/api && go build ./...) && (cd apps/worker && go build ./...) && npm --workspace apps/web run build",
+    "test": "(cd apps/api && go test ./...) && (cd apps/worker && go test ./...) && npm --workspace apps/web run test",
+    "lint": "(cd apps/api && go test ./...) && (cd apps/worker && go test ./...) && npm --workspace apps/web run lint",
+    "dev": "echo 'Run API: cd apps/api && go run ./cmd/api ; Run Worker: cd apps/worker && go run ./cmd/worker ; Run Web: npm --workspace apps/web run dev'"
+  }
+}

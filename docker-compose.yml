@@ -1,0 +1,76 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: incidentiq
+      POSTGRES_PASSWORD: incidentiq
+      POSTGRES_DB: incidentiq
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7.2
+    ports:
+      - "6379:6379"
+
+  api:
+    build: ./apps/api
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgres://incidentiq:incidentiq@postgres:5432/incidentiq?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_DB: 0
+      JIRA_ENABLED: "false"
+      JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+      JIRA_USERNAME: ${JIRA_USERNAME:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+      JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-}
+      JIRA_ACK_TRANSITION_ID: ${JIRA_ACK_TRANSITION_ID:-}
+      JIRA_RESOLVE_TRANSITION_ID: ${JIRA_RESOLVE_TRANSITION_ID:-}
+      JIRA_REOPEN_TRANSITION_ID: ${JIRA_REOPEN_TRANSITION_ID:-}
+      JIRA_RESOLUTION_FIELD: ${JIRA_RESOLUTION_FIELD:-resolution}
+      JIRA_RESOLUTION_VALUE: ${JIRA_RESOLUTION_VALUE:-Done}
+      DYNATRACE_ENABLED: "true"
+      DYNATRACE_WEBHOOK_SECRET: ${DYNATRACE_WEBHOOK_SECRET:-}
+      ELK_ENABLED: "true"
+      ELK_WEBHOOK_SECRET: ${ELK_WEBHOOK_SECRET:-}
+      GENERIC_WEBHOOK_SECRET: ${GENERIC_WEBHOOK_SECRET:-}
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+      - redis
+
+  worker:
+    build: ./apps/worker
+    environment:
+      DATABASE_URL: postgres://incidentiq:incidentiq@postgres:5432/incidentiq?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_DB: 0
+      JIRA_ENABLED: "false"
+      JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+      JIRA_USERNAME: ${JIRA_USERNAME:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+      JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-}
+      JIRA_ACK_TRANSITION_ID: ${JIRA_ACK_TRANSITION_ID:-}
+      JIRA_RESOLVE_TRANSITION_ID: ${JIRA_RESOLVE_TRANSITION_ID:-}
+      JIRA_REOPEN_TRANSITION_ID: ${JIRA_REOPEN_TRANSITION_ID:-}
+      JIRA_RESOLUTION_FIELD: ${JIRA_RESOLUTION_FIELD:-resolution}
+      JIRA_RESOLUTION_VALUE: ${JIRA_RESOLUTION_VALUE:-Done}
+    depends_on:
+      - postgres
+      - redis
+
+  web:
+    build: ./apps/web
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

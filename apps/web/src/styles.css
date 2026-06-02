@@ -1,0 +1,62 @@
+:root {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: #0f172a;
+  background: #f1f5f9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.layout {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.topbar p {
+  margin-top: 4px;
+  color: #334155;
+}
+
+.metrics-grid {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.metric-card {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 14px;
+}
+
+.metric-card h2 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.metric-card p {
+  margin: 10px 0 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.panel {
+  margin-top: 16px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 14px;
+}

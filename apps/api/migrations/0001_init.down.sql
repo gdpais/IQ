@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS ticket_template_versions;
+DROP TABLE IF EXISTS audit_log;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS report_snapshots;
+DROP TABLE IF EXISTS integration_events;
+DROP TABLE IF EXISTS deployments;
+DROP TABLE IF EXISTS teams;
+DROP TABLE IF EXISTS services;
+DROP TABLE IF EXISTS jira_links;
+DROP TABLE IF EXISTS alerts;
+DROP TABLE IF EXISTS incident_events;
+DROP TABLE IF EXISTS incidents;

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: incidentiq-config
+  namespace: incidentiq
+data:
+  PORT: "8080"
+  REDIS_ADDR: "redis:6379"
+  REDIS_DB: "0"
+  JIRA_ENABLED: "false"
+  JIRA_BASE_URL: ""
+  JIRA_PROJECT_KEY: ""
+  JIRA_ACK_TRANSITION_ID: ""
+  JIRA_RESOLVE_TRANSITION_ID: ""
+  JIRA_REOPEN_TRANSITION_ID: ""
+  JIRA_RESOLUTION_FIELD: "resolution"
+  JIRA_RESOLUTION_VALUE: "Done"
+  DYNATRACE_ENABLED: "true"
+  ELK_ENABLED: "true"
