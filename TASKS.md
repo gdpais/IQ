@@ -14,7 +14,7 @@ This backlog is derived from the approved MVP plan and is organized for phased e
 ### Acceptance criteria
 
 - [x] Repo builds locally for all apps.
-- [ ] Containers build for all apps.
+- [x] Containers build for all apps.
 - [x] Basic K8s deployment manifests validate.
 
 ## Phase 1 - Data and Platform Core
@@ -29,8 +29,8 @@ This backlog is derived from the approved MVP plan and is organized for phased e
 
 ### Acceptance criteria
 
-- [ ] DB migrations apply/rollback successfully.
-- [ ] API boots with DB + Redis connectivity checks.
+- [x] DB migrations apply/rollback successfully.
+- [x] API boots with DB + Redis connectivity checks.
 - [x] Core data model supports incident lifecycle storage and audit append-only events.
 
 ## Phase 2 - Incident Register and Lifecycle API
@@ -159,18 +159,18 @@ This backlog is derived from the approved MVP plan and is organized for phased e
 ## Phase 8 - Testing and Release Readiness
 
 - [x] Add unit tests for normalization, correlation, lifecycle transitions, metrics computation, template rendering.
-- [ ] Add integration tests for webhook -> incident -> JIRA sync flows.
-- [ ] Add integration tests for JIRA failure/recovery retries.
-- [ ] Add end-to-end tests for dashboard/report consistency and CSV exports.
-- [ ] Add performance smoke tests for high-volume alert ingestion.
+- [x] Add integration tests for webhook -> incident -> JIRA sync flows.
+- [x] Add integration tests for JIRA failure/recovery retries.
+- [x] Add end-to-end tests for dashboard/report consistency and CSV exports.
+- [x] Add performance smoke tests for high-volume alert ingestion.
 - [x] Add CI pipeline gates for lint, unit, integration test suites.
 - [x] Define MVP release checklist and sign-off criteria.
 
 ### Acceptance criteria
 
-- [ ] CI is green on required checks.
-- [ ] E2E test proves alert-to-report workflow.
-- [ ] MVP acceptance sign-off is possible with documented evidence.
+- [x] CI is green on required checks.
+- [x] E2E test proves alert-to-report workflow.
+- [x] MVP acceptance sign-off is possible with documented evidence.
 
 ## Out of Scope for This MVP
 
