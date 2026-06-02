@@ -1,6 +1,9 @@
 package incident
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type Status string
 
@@ -9,6 +12,29 @@ const (
 	StatusAcknowledged Status = "acknowledged"
 	StatusResolved     Status = "resolved"
 )
+
+// ValidateTransition checks whether moving an incident from the current status
+// to the target status is a legal lifecycle step. It returns nil on success and
+// a descriptive error on invalid transitions.
+func ValidateTransition(from Status, to Status) error {
+	switch to {
+	case StatusAcknowledged:
+		if from != StatusOpen {
+			return fmt.Errorf("invalid transition from %s to %s: must be open first", from, to)
+		}
+	case StatusResolved:
+		if from != StatusAcknowledged && from != StatusOpen {
+			return fmt.Errorf("invalid transition from %s to %s: must be open or acknowledged", from, to)
+		}
+	case StatusOpen:
+		if from != StatusResolved {
+			return fmt.Errorf("invalid transition from %s to %s: can only reopen resolved incidents", from, to)
+		}
+	default:
+		return fmt.Errorf("unknown target status %q", to)
+	}
+	return nil
+}
 
 type Incident struct {
 	ID             string     `json:"id"`

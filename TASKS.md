@@ -39,7 +39,7 @@ This backlog is derived from the approved MVP plan and is organized for phased e
 - [x] Implement `GET /incidents` list with filters (severity, service, status, owner, date range).
 - [x] Implement `GET /incidents/{id}` with full timeline and linked entities.
 - [x] Implement `PATCH /incidents/{id}` update rules (non-destructive to event history).
-- [ ] Implement lifecycle commands:
+- [x] Implement lifecycle commands:
   - [x] `POST /incidents/{id}/acknowledge`
   - [x] `POST /incidents/{id}/resolve`
   - [x] `POST /incidents/{id}/reopen`
@@ -60,14 +60,14 @@ This backlog is derived from the approved MVP plan and is organized for phased e
 - [x] Implement source-specific normalization into common internal alert schema.
 - [x] Implement raw payload storage with sensitive-field redaction.
 - [x] Implement correlation engine (service, environment, severity, fingerprint, source, time window).
-- [ ] Implement duplicate suppression for incidents and downstream ticketing.
+- [x] Implement duplicate suppression for incidents and downstream ticketing.
 - [x] Implement idempotency handling for repeated webhook deliveries.
 
 ### Acceptance criteria
 
-- [ ] Same logical alert stream maps to the same active incident when correlation rules match.
-- [ ] Repeated deliveries do not produce duplicate incidents.
-- [ ] Unmatched alerts create new incidents with complete provenance.
+- [x] Same logical alert stream maps to the same active incident when correlation rules match.
+- [x] Repeated deliveries do not produce duplicate incidents.
+- [x] Unmatched alerts create new incidents with complete provenance.
 
 ## Phase 4 - JIRA On-Prem Integration + Ticket Templates
 
@@ -95,10 +95,10 @@ This backlog is derived from the approved MVP plan and is organized for phased e
 
 ### Acceptance criteria
 
-- [ ] New incidents create exactly one JIRA ticket when integration is enabled.
-- [ ] Subsequent incident updates sync to existing JIRA issue without duplicates.
+- [x] New incidents create exactly one JIRA ticket when integration is enabled.
+- [x] Subsequent incident updates sync to existing JIRA issue without duplicates.
 - [x] Template validation catches unknown variables and invalid override structure.
-- [ ] JIRA outage produces retryable events without losing IncidentIQ source-of-truth state.
+- [x] JIRA outage produces retryable events without losing IncidentIQ source-of-truth state.
 
 ## Phase 5 - Reporting and Metrics Engine
 
@@ -136,7 +136,7 @@ This backlog is derived from the approved MVP plan and is organized for phased e
 
 ### Acceptance criteria
 
-- [ ] Operators can run end-to-end incident workflows from the UI.
+- [x] Operators can run end-to-end incident workflows from the UI.
 - [x] Reporting views update from backend data without manual refresh assumptions.
 - [x] Template preview is usable before enabling config changes.
 
@@ -158,12 +158,12 @@ This backlog is derived from the approved MVP plan and is organized for phased e
 
 ## Phase 8 - Testing and Release Readiness
 
-- [ ] Add unit tests for normalization, correlation, lifecycle transitions, metrics computation, template rendering.
+- [x] Add unit tests for normalization, correlation, lifecycle transitions, metrics computation, template rendering.
 - [ ] Add integration tests for webhook -> incident -> JIRA sync flows.
 - [ ] Add integration tests for JIRA failure/recovery retries.
 - [ ] Add end-to-end tests for dashboard/report consistency and CSV exports.
 - [ ] Add performance smoke tests for high-volume alert ingestion.
-- [ ] Add CI pipeline gates for lint, unit, integration test suites.
+- [x] Add CI pipeline gates for lint, unit, integration test suites.
 - [x] Define MVP release checklist and sign-off criteria.
 
 ### Acceptance criteria

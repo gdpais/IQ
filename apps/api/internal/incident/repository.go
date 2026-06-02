@@ -274,19 +274,8 @@ func (r *Repository) Transition(ctx context.Context, id string, target Status, a
 		return Incident{}, err
 	}
 
-	switch target {
-	case StatusAcknowledged:
-		if current.Status != StatusOpen {
-			return Incident{}, fmt.Errorf("invalid transition from %s to %s", current.Status, target)
-		}
-	case StatusResolved:
-		if current.Status != StatusAcknowledged && current.Status != StatusOpen {
-			return Incident{}, fmt.Errorf("invalid transition from %s to %s", current.Status, target)
-		}
-	case StatusOpen:
-		if current.Status != StatusResolved {
-			return Incident{}, fmt.Errorf("invalid transition from %s to %s", current.Status, target)
-		}
+	if err := ValidateTransition(current.Status, target); err != nil {
+		return Incident{}, err
 	}
 
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})

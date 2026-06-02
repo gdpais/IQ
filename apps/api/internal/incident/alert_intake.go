@@ -71,7 +71,7 @@ func normalizeDynatrace(alert *NormalizedAlert, payload map[string]any) {
 }
 
 func normalizeELK(alert *NormalizedAlert, payload map[string]any) {
-	alert.SourceEventID = firstString(payload, "alert_id", "alertId", "id", "event.id", "kibana.alert.uuid", "rule.id")
+	alert.SourceEventID = firstString(payload, "alert_id", "alertId", "kibana.alert.uuid", "event.id", "id", "rule.id")
 	alert.Fingerprint = firstString(payload, "fingerprint", "kibana.alert.rule.uuid", "rule.id", "event.id")
 	alert.Title = firstString(payload, "title", "rule.name", "alert.name", "message")
 	alert.Summary = firstString(payload, "summary", "message", "rule.description", "title")
