@@ -226,6 +226,22 @@ func (s *Server) handleIncidentsCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	if strings.TrimSpace(req.Title) == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("title is required"))
+		return
+	}
+	if strings.TrimSpace(req.Severity) == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("severity is required"))
+		return
+	}
+	if strings.TrimSpace(req.Service) == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("service is required"))
+		return
+	}
+	if strings.TrimSpace(req.Environment) == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("environment is required"))
+		return
+	}
 	if req.Actor == "" {
 		req.Actor = "system"
 	}
@@ -289,7 +305,11 @@ func (s *Server) handleIncidentByPath(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleIncidentGet(w http.ResponseWriter, r *http.Request, id string) {
 	out, err := s.incident.GetDetail(r.Context(), id)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeErr(w, http.StatusNotFound, errors.New("incident not found"))
+		} else {
+			writeErr(w, http.StatusInternalServerError, err)
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -307,7 +327,11 @@ func (s *Server) handleIncidentPatch(w http.ResponseWriter, r *http.Request, id 
 
 	out, err := s.incident.Patch(r.Context(), id, req)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeErr(w, http.StatusNotFound, errors.New("incident not found"))
+		} else {
+			writeErr(w, http.StatusInternalServerError, err)
+		}
 		return
 	}
 	s.syncIncidentToJIRA(r.Context(), out, "incident_updated")
@@ -324,10 +348,7 @@ func (s *Server) handleTransition(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 
-	actor := "system"
-	if r.URL.Query().Get("actor") != "" {
-		actor = r.URL.Query().Get("actor")
-	}
+	actor := actorFromRequest(r)
 	out, err := s.incident.Transition(r.Context(), id, status, actor)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)

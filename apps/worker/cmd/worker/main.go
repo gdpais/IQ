@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -146,7 +147,7 @@ type jiraIssueRef struct {
 }
 
 type worker struct {
-	db    *pgx.Conn
+	db    *pgxpool.Pool
 	redis *redis.Client
 	jira  jiraConfig
 	http  *http.Client
@@ -159,11 +160,11 @@ func main() {
 	}
 
 	ctx := context.Background()
-	db, err := pgx.Connect(ctx, cfg.DBURL)
+	db, err := pgxpool.New(ctx, cfg.DBURL)
 	if err != nil {
 		log.Fatalf("db connect failed: %v", err)
 	}
-	defer db.Close(ctx)
+	defer db.Close()
 
 	redisClient := redis.NewClient(&redis.Options{
 		Addr: cfg.RedisAddr,
