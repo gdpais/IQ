@@ -1,0 +1,162 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Go API — lint, test, build
+  # -------------------------------------------------------------------------
+  api:
+    name: API
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Verify modules are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Lint (vet)
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Build
+        run: go build ./cmd/api
+
+  # -------------------------------------------------------------------------
+  # Go Worker — lint, test, build
+  # -------------------------------------------------------------------------
+  worker:
+    name: Worker
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/worker
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/worker/go.mod
+          cache-dependency-path: apps/worker/go.sum
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Verify modules are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Lint (vet)
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Build
+        run: go build ./cmd/worker
+
+  # -------------------------------------------------------------------------
+  # Web — install, type-check, build
+  # -------------------------------------------------------------------------
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  # -------------------------------------------------------------------------
+  # Integration tests — API + Worker against real Postgres + Redis
+  # Runs only when TEST_DATABASE_URL secret is configured on the repo.
+  # -------------------------------------------------------------------------
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    if: ${{ vars.RUN_INTEGRATION_TESTS == 'true' || github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: incidentiq_test
+          POSTGRES_USER: incidentiq
+          POSTGRES_PASSWORD: incidentiq
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgres://incidentiq:incidentiq@localhost:5432/incidentiq_test
+      TEST_REDIS_ADDR: localhost:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Integration tests — API
+        working-directory: apps/api
+        run: go test -tags integration -race -count=1 -v ./internal/httpapi/...
+
+      - name: Integration tests — Worker
+        working-directory: apps/worker
+        run: go test -tags integration -race -count=1 -v ./cmd/worker/...
