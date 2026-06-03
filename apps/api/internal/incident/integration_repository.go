@@ -119,3 +119,99 @@ func (r *Repository) ListIntegrationEvents(ctx context.Context, filter Integrati
 	}
 	return items, rows.Err()
 }
+
+func (r *Repository) ClaimPendingIntegrationEvents(ctx context.Context, integrationName string, limit int) ([]IntegrationEvent, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 25
+	}
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		SELECT id
+		FROM integration_events
+		WHERE integration_name = $1
+		  AND status = 'pending'
+		  AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+		ORDER BY created_at ASC
+		FOR UPDATE SKIP LOCKED
+		LIMIT $2
+	`, integrationName, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
+	events := make([]IntegrationEvent, 0, len(ids))
+	for _, id := range ids {
+		var out IntegrationEvent
+		var payload []byte
+		err := tx.QueryRow(ctx, `
+			UPDATE integration_events
+			SET status = 'processing', attempts = attempts + 1, updated_at = NOW()
+			WHERE id = $1
+			RETURNING id, integration_name, event_type, status, payload, attempts, next_retry_at, created_at, updated_at
+		`, id).Scan(
+			&out.ID, &out.IntegrationName, &out.Type, &out.Status, &payload, &out.Attempts, &out.NextRetryAt, &out.CreatedAt, &out.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		out.Payload = jsonToMap(payload)
+		events = append(events, out)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
+func (r *Repository) CompleteIntegrationEvent(ctx context.Context, id string, payload map[string]any) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE integration_events
+		SET status = 'completed', payload = $2, next_retry_at = NULL, updated_at = NOW()
+		WHERE id = $1
+	`, id, payloadToJSON(payload))
+	return err
+}
+
+func (r *Repository) RetryIntegrationEvent(ctx context.Context, id string, payload map[string]any, nextRetryAt time.Time) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE integration_events
+		SET status = 'pending', payload = $2, next_retry_at = $3, updated_at = NOW()
+		WHERE id = $1
+	`, id, payloadToJSON(payload), nextRetryAt.UTC())
+	return err
+}
+
+func (r *Repository) FailIntegrationEvent(ctx context.Context, id string, payload map[string]any) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE integration_events
+		SET status = 'failed', payload = $2, next_retry_at = NULL, updated_at = NOW()
+		WHERE id = $1
+	`, id, payloadToJSON(payload))
+	return err
+}

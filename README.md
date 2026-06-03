@@ -1,6 +1,6 @@
 # IncidentIQ
 
-Production SRE incident management tool with automated alert intake, JIRA integration, and DORA/SRE reporting.
+Production SRE incident management tool with automated alert intake, JIRA integration, Microsoft Teams paging, and DORA/SRE reporting.
 
 ## Overview
 
@@ -9,6 +9,7 @@ IncidentIQ is a reporting-focused incident management system for production SRE 
 - **Incident lifecycle**: Track open → acknowledged → resolved → reopen workflow
 - **Alert intake**: Auto-correlate Dynatrace, ELK, and generic webhook alerts into incidents
 - **JIRA sync**: Auto-create and update JIRA tickets with configurable templates
+- **Teams paging**: Send short incident pages to Microsoft Teams channels with user and tag mentions
 - **Metrics**: Live MTTD/MTTA/MTTR, SLA tracking, alert-to-incident conversion, DORA metrics
 - **Reporting**: SRE, DORA, and executive dashboards with CSV export
 - **Audit trail**: Immutable event log of all state changes and admin actions
@@ -28,7 +29,7 @@ IncidentIQ is a reporting-focused incident management system for production SRE 
 │ - Incident CRUD + lifecycle transitions                     │
 │ - Webhook ingestion (Dynatrace, ELK, generic)               │
 │ - Metric computation, reporting, CSV export                 │
-│ - JIRA sync + ticket template management                    │
+│ - JIRA sync + Teams paging + template management            │
 │ - RBAC (viewer, responder, commander, admin)                │
 └──┬──────────────────────────────┬──────────────────────────┘
    │                              │
@@ -47,6 +48,7 @@ IncidentIQ is a reporting-focused incident management system for production SRE 
                     ┌─────────┴─────────┐
                     │ Worker (Go 1.23)  │
                     │ - JIRA retries    │
+                    │ - Teams paging    │
                     │ - Snapshot        │
                     │   materialization │
                     └───────────────────┘
@@ -108,6 +110,13 @@ JIRA_USERNAME=incident-bot
 JIRA_API_TOKEN=your-jira-token
 JIRA_PROJECT_KEY=OPS
 
+# Microsoft Teams (optional)
+TEAMS_ENABLED=false
+TEAMS_TENANT_ID=your-tenant-id
+TEAMS_CLIENT_ID=your-app-client-id
+TEAMS_CLIENT_SECRET=your-app-client-secret
+TEAMS_TOKEN_ENCRYPTION_KEY=replace-with-strong-secret
+
 # Webhooks
 WEBHOOK_DYNATRACE_SECRET=dynatrace-secret
 WEBHOOK_ELK_SECRET=elk-secret
@@ -153,6 +162,7 @@ go run ./cmd/worker
 
 The worker will:
 - Poll for retryable JIRA sync events every 5 seconds
+- Poll for pending Microsoft Teams paging events every 5 seconds
 - Materialize report snapshots every 5 minutes (configurable)
 
 #### Start the frontend (in a new terminal)
@@ -220,10 +230,25 @@ kubectl logs -n incidentiq deployment/web -f
 | `JIRA_USERNAME` | string | `` | JIRA username |
 | `JIRA_API_TOKEN` | string | `` | JIRA API token |
 | `JIRA_PROJECT_KEY` | string | `` | Default JIRA project key |
+| `TEAMS_ENABLED` | bool | `false` | Enable Microsoft Teams paging |
+| `TEAMS_TENANT_ID` | string | `` | Microsoft Entra tenant ID |
+| `TEAMS_CLIENT_ID` | string | `` | Microsoft Graph app client ID |
+| `TEAMS_CLIENT_SECRET` | string | `` | Microsoft Graph app client secret |
+| `TEAMS_TOKEN_ENCRYPTION_KEY` | string | `` | Secret used to encrypt stored Teams sender tokens |
 | `WEBHOOK_DYNATRACE_SECRET` | string | `` | Dynatrace webhook signature secret |
 | `WEBHOOK_ELK_SECRET` | string | `` | ELK webhook signature secret |
 | `WEBHOOK_GENERIC_SECRET` | string | `` | Generic webhook signature secret |
 | `REPORT_SNAPSHOT_INTERVAL` | duration | `5m` | Snapshot materialization interval (worker only) |
+
+### Teams paging runtime setup
+
+1. Configure `TEAMS_*` environment variables for both `api` and `worker`.
+2. Open the **Integrations** tab in the web UI.
+3. Save a Teams sender connection using an access token and refresh token for the dedicated sender account.
+4. Load Teams and channels from Microsoft Graph, create one or more routes, and attach users and/or Teams tags.
+5. Use route filters for `owner_team`, `service`, `environment`, and minimum severity as needed.
+
+Teams pages are queued when an incident is created or reopened. Each message includes the impacted services, the incident start time, and a short issue description when available.
 
 ### Database Migrations
 

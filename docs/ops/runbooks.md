@@ -17,14 +17,30 @@ Actions:
 
 Symptoms:
 - JIRA retry events remain `pending`.
+- Teams paging events remain `pending`.
 - Report snapshots stop refreshing.
 
 Actions:
 1. Check worker logs for database, Redis, or JIRA errors.
-2. Verify Redis is reachable because worker locks use Redis.
-3. Verify `REPORT_SNAPSHOT_INTERVAL` is valid, for example `5m`.
-4. Restart worker pods.
-5. Confirm `integration_events` move from `pending` to `completed` and `report_snapshots.computed_at` advances.
+2. Check worker logs for Microsoft Graph or Teams auth refresh errors.
+3. Verify Redis is reachable because worker locks use Redis.
+4. Verify `REPORT_SNAPSHOT_INTERVAL` is valid, for example `5m`.
+5. Restart worker pods.
+6. Confirm `integration_events` move from `pending` to `completed` and `report_snapshots.computed_at` advances.
+
+## Microsoft Teams Paging Failure
+
+Symptoms:
+- Incidents are created or reopened but no Teams page appears.
+- `integration_events` contains pending or failed `page_incident_opened` or `page_incident_reopened` events.
+
+Actions:
+1. Check `GET /integration-events?integration=teams`.
+2. Verify `TEAMS_ENABLED`, `TEAMS_TENANT_ID`, `TEAMS_CLIENT_ID`, `TEAMS_CLIENT_SECRET`, and `TEAMS_TOKEN_ENCRYPTION_KEY`.
+3. In the web UI Integrations tab, run the Teams connectivity test and confirm the stored sender is connected.
+4. Confirm at least one enabled Teams route matches the incident `owner_team`, `service`, `environment`, and severity.
+5. If Microsoft Graph tokens expired, reconnect the sender account and watch the worker drain pending events.
+6. Use the route test action to validate a specific channel and mention set before re-triggering a real incident.
 
 ## JIRA Outage
 
