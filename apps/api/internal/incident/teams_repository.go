@@ -3,6 +3,7 @@ package incident
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -111,6 +112,9 @@ func (r *Repository) GetTeamsRoute(ctx context.Context, id string) (*TeamsRoute,
 }
 
 func (r *Repository) CreateTeamsRoute(ctx context.Context, req CreateTeamsRouteRequest) (TeamsRoute, error) {
+	if err := validateTeamsRouteRequest(req.Name, req.TeamID, req.ChannelID, req.Recipients); err != nil {
+		return TeamsRoute{}, err
+	}
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return TeamsRoute{}, err
@@ -147,6 +151,9 @@ func (r *Repository) CreateTeamsRoute(ctx context.Context, req CreateTeamsRouteR
 }
 
 func (r *Repository) UpdateTeamsRoute(ctx context.Context, id string, req UpdateTeamsRouteRequest) (TeamsRoute, error) {
+	if err := validateTeamsRouteRequest(req.Name, req.TeamID, req.ChannelID, req.Recipients); err != nil {
+		return TeamsRoute{}, err
+	}
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return TeamsRoute{}, err
@@ -196,8 +203,14 @@ func (r *Repository) UpdateTeamsRoute(ctx context.Context, id string, req Update
 }
 
 func (r *Repository) DeleteTeamsRoute(ctx context.Context, id string) error {
-	_, err := r.db.Exec(ctx, `DELETE FROM teams_routes WHERE id = $1`, id)
-	return err
+	cmd, err := r.db.Exec(ctx, `DELETE FROM teams_routes WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 func (r *Repository) MatchTeamsRoutes(ctx context.Context, inc Incident) ([]TeamsRoute, error) {
@@ -349,4 +362,30 @@ func actorOrSystem(actor string) string {
 		return "system"
 	}
 	return actor
+}
+
+func validateTeamsRouteRequest(name string, teamID string, channelID string, recipients []CreateTeamsRouteRecipient) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("name is required")
+	}
+	if strings.TrimSpace(teamID) == "" {
+		return fmt.Errorf("team_id is required")
+	}
+	if strings.TrimSpace(channelID) == "" {
+		return fmt.Errorf("channel_id is required")
+	}
+	validRecipients := 0
+	for _, recipient := range recipients {
+		if strings.TrimSpace(recipient.DisplayName) == "" || strings.TrimSpace(recipient.TeamsObjectID) == "" {
+			continue
+		}
+		if recipient.Type != TeamsRecipientTypeUser && recipient.Type != TeamsRecipientTypeTag {
+			return fmt.Errorf("recipient type must be %q or %q", TeamsRecipientTypeUser, TeamsRecipientTypeTag)
+		}
+		validRecipients++
+	}
+	if validRecipients == 0 {
+		return fmt.Errorf("at least one recipient is required")
+	}
+	return nil
 }

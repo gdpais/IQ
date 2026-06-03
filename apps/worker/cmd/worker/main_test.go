@@ -133,3 +133,14 @@ func TestComputeLiveMetricsForSnapshots(t *testing.T) {
 		t.Fatalf("MTTD = %#v", metrics.MeanTimeToDetectSeconds)
 	}
 }
+
+func TestIntegrationEventWithPayload(t *testing.T) {
+	event := integrationEvent{ID: "evt-1", Payload: map[string]any{"a": "b"}}
+	next := integrationEventWithPayload(event, map[string]any{"message_id": "m-1"})
+	if next.ID != "evt-1" {
+		t.Fatalf("event ID changed: %q", next.ID)
+	}
+	if next.Payload["message_id"] != "m-1" {
+		t.Fatalf("payload not replaced: %#v", next.Payload)
+	}
+}
