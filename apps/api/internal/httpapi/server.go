@@ -717,7 +717,7 @@ func (s *Server) handleTeamsRouteCreate(w http.ResponseWriter, r *http.Request) 
 	req.Actor = actorFromRequest(r)
 	out, err := s.incident.CreateTeamsRoute(r.Context(), req)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
 	_, _ = s.incident.CreateIntegrationEvent(r.Context(), incident.CreateIntegrationEventRequest{
@@ -738,7 +738,11 @@ func (s *Server) handleTeamsRoutePatch(w http.ResponseWriter, r *http.Request, i
 	req.Actor = actorFromRequest(r)
 	out, err := s.incident.UpdateTeamsRoute(r.Context(), id, req)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeErr(w, http.StatusNotFound, errors.New("route not found"))
+			return
+		}
+		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
 	_, _ = s.incident.CreateIntegrationEvent(r.Context(), incident.CreateIntegrationEventRequest{
@@ -752,6 +756,10 @@ func (s *Server) handleTeamsRoutePatch(w http.ResponseWriter, r *http.Request, i
 
 func (s *Server) handleTeamsRouteDelete(w http.ResponseWriter, r *http.Request, id string) {
 	if err := s.incident.DeleteTeamsRoute(r.Context(), id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeErr(w, http.StatusNotFound, errors.New("route not found"))
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -794,8 +802,9 @@ func (s *Server) handleTeamsRouteTest(w http.ResponseWriter, r *http.Request, id
 	}
 	result, updated, err := s.teams.SendChannelMessage(r.Context(), state, route.TeamID, route.ChannelID, body, mentions)
 	if updated != nil {
-		if _, persistErr := s.incident.UpsertTeamsAuthState(r.Context(), *updated); persistErr == nil {
-			_, _ = s.incident.GetTeamsAuthState(r.Context())
+		if _, persistErr := s.incident.UpsertTeamsAuthState(r.Context(), *updated); persistErr != nil {
+			writeErr(w, http.StatusInternalServerError, persistErr)
+			return
 		}
 	}
 	status := "completed"
@@ -945,6 +954,9 @@ func (s *Server) enqueueTeamsNotifications(ctx context.Context, incidentID strin
 		}
 	}
 	for _, channel := range channels {
+		if len(channel.Recipients) == 0 {
+			continue
+		}
 		_, _ = s.incident.CreateIntegrationEvent(ctx, incident.CreateIntegrationEventRequest{
 			IntegrationName: incident.TeamsIntegrationName,
 			Type:            "page_" + string(reason),

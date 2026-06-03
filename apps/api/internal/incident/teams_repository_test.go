@@ -20,3 +20,18 @@ func TestMeetsSeverity(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateTeamsRouteRequest(t *testing.T) {
+	if err := validateTeamsRouteRequest("", "team-1", "channel-1", []CreateTeamsRouteRecipient{{Type: TeamsRecipientTypeUser, TeamsObjectID: "user-1", DisplayName: "Alice"}}); err == nil {
+		t.Fatal("expected missing name validation error")
+	}
+	if err := validateTeamsRouteRequest("route", "team-1", "channel-1", nil); err == nil {
+		t.Fatal("expected recipients validation error")
+	}
+	if err := validateTeamsRouteRequest("route", "team-1", "channel-1", []CreateTeamsRouteRecipient{{Type: "group", TeamsObjectID: "x", DisplayName: "Bad"}}); err == nil {
+		t.Fatal("expected recipient type validation error")
+	}
+	if err := validateTeamsRouteRequest("route", "team-1", "channel-1", []CreateTeamsRouteRecipient{{Type: TeamsRecipientTypeTag, TeamsObjectID: "tag-1", DisplayName: "on-call"}}); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}

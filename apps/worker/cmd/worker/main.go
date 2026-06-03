@@ -233,13 +233,21 @@ func (w *worker) processJIRAEvent(ctx context.Context, event integrationEvent) e
 	}
 	client := &jiraClient{cfg: jiraCfg, http: w.http}
 	action, _ := event.Payload["action"].(string)
+	if issueKey, _ := event.Payload["jira_issue_key"].(string); issueKey != "" {
+		issueID, _ := event.Payload["jira_issue_id"].(string)
+		if _, err := w.upsertJIRALink(ctx, incidentID, issueKey, issueID); err != nil {
+			return w.retryOrFail(ctx, event, err, true)
+		}
+		return w.completeIntegrationEvent(ctx, event.ID, event.Payload)
+	}
 	if link == nil || action == "create" {
 		created, err := client.CreateIssue(ctx, issue)
 		if err != nil {
 			return w.retryOrFail(ctx, event, err, transientError(err))
 		}
 		if _, err := w.upsertJIRALink(ctx, incidentID, created.Key, created.ID); err != nil {
-			return w.retryOrFail(ctx, event, err, true)
+			payload := mergePayload(event.Payload, map[string]any{"jira_issue_key": created.Key, "jira_issue_id": created.ID})
+			return w.retryOrFail(ctx, integrationEventWithPayload(event, payload), err, true)
 		}
 		return w.completeIntegrationEvent(ctx, event.ID, mergePayload(event.Payload, map[string]any{"jira_issue_key": created.Key, "jira_issue_id": created.ID}))
 	}
@@ -284,6 +292,17 @@ func (w *worker) processTeamsEvent(ctx context.Context, event integrationEvent) 
 		return w.retryOrFail(ctx, event, err, true)
 	}
 	if !reserved {
+		if messageID, _ := event.Payload["message_id"].(string); messageID != "" {
+			if err := w.completeTeamsDelivery(ctx, incidentID, channelID, reason, messageID, map[string]any{
+				"team_id":    teamID,
+				"channel_id": channelID,
+				"message_id": messageID,
+				"recipients": recipients,
+			}); err != nil {
+				return w.retryOrFail(ctx, event, err, true)
+			}
+			return w.completeIntegrationEvent(ctx, event.ID, event.Payload)
+		}
 		return w.completeIntegrationEvent(ctx, event.ID, mergePayload(event.Payload, map[string]any{"duplicate": true}))
 	}
 
@@ -307,7 +326,8 @@ func (w *worker) processTeamsEvent(ctx context.Context, event integrationEvent) 
 		"message_id": messageID,
 		"recipients": recipients,
 	}); err != nil {
-		return w.retryOrFail(ctx, event, err, true)
+		payload := mergePayload(event.Payload, map[string]any{"message_id": messageID})
+		return w.retryOrFail(ctx, integrationEventWithPayload(event, payload), err, true)
 	}
 	return w.completeIntegrationEvent(ctx, event.ID, mergePayload(event.Payload, map[string]any{"message_id": messageID}))
 }
@@ -556,10 +576,12 @@ func (w *worker) reserveTeamsDelivery(ctx context.Context, incidentID string, ch
 
 func (w *worker) completeTeamsDelivery(ctx context.Context, incidentID string, channelID string, reason string, messageID string, payload map[string]any) error {
 	_, err := w.db.Exec(ctx, `
-		UPDATE incident_notification_deliveries
-		SET message_id = $4, payload = $5
-		WHERE integration_name = 'teams' AND incident_id = $1 AND channel_id = $2 AND notification_reason = $3
-	`, incidentID, channelID, reason, messageID, encodePayload(payload))
+		INSERT INTO incident_notification_deliveries (id, integration_name, incident_id, channel_id, notification_reason, message_id, payload, created_at)
+		VALUES ($1, 'teams', $2, $3, $4, $5, $6, NOW())
+		ON CONFLICT (integration_name, incident_id, channel_id, notification_reason) DO UPDATE
+		SET message_id = EXCLUDED.message_id,
+		    payload = EXCLUDED.payload
+	`, fmt.Sprintf("%d", time.Now().UnixNano()), incidentID, channelID, reason, messageID, encodePayload(payload))
 	return err
 }
 
@@ -1016,6 +1038,11 @@ func mergePayload(base map[string]any, extra map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
+}
+
+func integrationEventWithPayload(event integrationEvent, payload map[string]any) integrationEvent {
+	event.Payload = payload
+	return event
 }
 
 func parseRecipients(value any) []routeRecipient {
