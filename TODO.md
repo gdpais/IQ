@@ -177,6 +177,22 @@ This backlog is derived from the approved MVP plan and is organized for phased e
 - [ ] Remove github dependencies where possible.
 - [ ] Remove unused packages and dependencies.
 
+## Microsoft Teams Paging
+
+- [x] Add Teams integration config and secret handling for Graph auth and token encryption.
+- [x] Add DB schema for Teams routes, route recipients, sender auth state, and incident notification deliveries.
+- [x] Implement Teams Graph client for connectivity test, team/channel lookup, user lookup, tag lookup, and channel message send with mentions.
+- [x] Implement repository layer for Teams routes, recipients, sender auth state, and delivery idempotency.
+- [x] Extend integration event processing to support Teams paging jobs with retry/backoff.
+- [x] Add a worker service to process pending integration events, including Teams delivery.
+- [x] Trigger Teams paging on incident create and incident reopen only.
+- [x] Format Teams pages with mentions, services involved, issue start time, and short issue description.
+- [x] Add API endpoints for Teams integration status, connect/test flow, and runtime route CRUD.
+- [x] Add UI in Integrations tab to manage Teams routes and recipients at runtime.
+- [x] Show Teams integration events in the integrations view.
+- [x] Add unit, integration, and UI coverage for routing, formatting, enqueueing, retries, and idempotency.
+- [x] Update README, ops runbooks, and deployment manifests for Teams integration and worker operation.
+
 ## Out of Scope for This MVP
 
 - [ ] Playbooks and automated remediation execution.

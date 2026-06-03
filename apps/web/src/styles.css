@@ -512,6 +512,32 @@ p {
   border-bottom: 1px solid #e2e7ec;
 }
 
+.integration-form,
+.integration-editor {
+  padding: 14px;
+}
+
+.integration-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #334150;
+}
+
+.checkbox-row input {
+  width: auto;
+  min-height: auto;
+}
+
+.integrations-layout .detail-panel {
+  padding-bottom: 0;
+}
+
 .template-layout {
   align-items: start;
 }

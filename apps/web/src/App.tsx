@@ -107,8 +107,12 @@ type IntegrationStatus = {
   name: string;
   enabled: boolean;
   configured: boolean;
+  connected?: boolean;
   base_url?: string;
   project_key?: string;
+  sender_display_name?: string;
+  sender_upn?: string;
+  tenant_id?: string;
 };
 
 type IntegrationEvent = {
@@ -121,6 +125,52 @@ type IntegrationEvent = {
   next_retry_at?: string;
   created_at: string;
   updated_at: string;
+};
+
+type DirectoryEntry = {
+  id: string;
+  display_name: string;
+  description?: string;
+  upn?: string;
+};
+
+type TeamsRouteRecipient = {
+  id?: string;
+  route_id?: string;
+  type: "user" | "tag";
+  teams_object_id: string;
+  display_name: string;
+  upn?: string;
+};
+
+type TeamsRoute = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  team_id: string;
+  team_name: string;
+  channel_id: string;
+  channel_name: string;
+  owner_team?: string;
+  service?: string;
+  environment?: string;
+  severity_min?: string;
+  recipients: TeamsRouteRecipient[];
+};
+
+type TeamsRouteForm = {
+  id?: string;
+  name: string;
+  enabled: boolean;
+  team_id: string;
+  team_name: string;
+  channel_id: string;
+  channel_name: string;
+  owner_team: string;
+  service: string;
+  environment: string;
+  severity_min: string;
+  recipients: TeamsRouteRecipient[];
 };
 
 type Filters = {
@@ -156,6 +206,20 @@ const emptyIncidentForm: CreateIncidentForm = {
   service: "",
   environment: "prod",
   owner_team: "sre"
+};
+
+export const emptyTeamsRouteForm: TeamsRouteForm = {
+  name: "",
+  enabled: true,
+  team_id: "",
+  team_name: "",
+  channel_id: "",
+  channel_name: "",
+  owner_team: "",
+  service: "",
+  environment: "",
+  severity_min: "",
+  recipients: []
 };
 
 const defaultTemplate = `version: 1
@@ -255,6 +319,23 @@ function formatDuration(seconds?: number) {
 
 function percent(value: number) {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+export function routeToForm(route: TeamsRoute): TeamsRouteForm {
+  return {
+    id: route.id,
+    name: route.name,
+    enabled: route.enabled,
+    team_id: route.team_id,
+    team_name: route.team_name,
+    channel_id: route.channel_id,
+    channel_name: route.channel_name,
+    owner_team: route.owner_team ?? "",
+    service: route.service ?? "",
+    environment: route.environment ?? "",
+    severity_min: route.severity_min ?? "",
+    recipients: route.recipients ?? []
+  };
 }
 
 function severityRank(severity: string) {
@@ -782,20 +863,38 @@ function ReportsWorkspace() {
 function IntegrationsWorkspace() {
   const [statuses, setStatuses] = useState<IntegrationStatus[]>([]);
   const [events, setEvents] = useState<IntegrationEvent[]>([]);
+  const [routes, setRoutes] = useState<TeamsRoute[]>([]);
+  const [routeForm, setRouteForm] = useState<TeamsRouteForm>(emptyTeamsRouteForm);
+  const [teamOptions, setTeamOptions] = useState<DirectoryEntry[]>([]);
+  const [channelOptions, setChannelOptions] = useState<DirectoryEntry[]>([]);
+  const [userResults, setUserResults] = useState<DirectoryEntry[]>([]);
+  const [tagResults, setTagResults] = useState<DirectoryEntry[]>([]);
+  const [userQuery, setUserQuery] = useState("");
+  const [connectForm, setConnectForm] = useState({
+    access_token: "",
+    refresh_token: "",
+    expires_at: "",
+    scopes: "offline_access ChannelMessage.Send Team.ReadBasic.All ChannelMember.Read.All User.Read"
+  });
   const [result, setResult] = useState("");
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+
+  const teamsStatus = statuses.find((status) => status.name === "teams");
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      const [statusOut, eventsOut] = await Promise.all([
+      const [statusOut, eventsOut, routesOut] = await Promise.all([
         apiFetch<IntegrationStatus[]>("/integrations"),
-        apiFetch<IntegrationEvent[]>("/integration-events?limit=25")
+        apiFetch<IntegrationEvent[]>("/integration-events?limit=25"),
+        apiFetch<TeamsRoute[]>("/integrations/teams/routes")
       ]);
       setStatuses(statusOut);
       setEvents(eventsOut);
+      setRoutes(routesOut);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load integrations");
     } finally {
@@ -811,12 +910,222 @@ function IntegrationsWorkspace() {
     setResult("");
     setError("");
     try {
+      setBusy("jira-test");
       const out = await apiFetch<{ success: boolean; message: string }>("/integrations/jira/test", { method: "POST" });
       setResult(out.message);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to test JIRA");
       await load();
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const testTeams = async () => {
+    setBusy("teams-test");
+    setResult("");
+    setError("");
+    try {
+      const out = await apiFetch<{ success: boolean; message: string }>("/integrations/teams/test", { method: "POST" });
+      setResult(out.message);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to test Teams");
+      await load();
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const connectTeams = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy("teams-connect");
+    setResult("");
+    setError("");
+    try {
+      await apiFetch("/integrations/teams/connect", {
+        method: "POST",
+        body: JSON.stringify({
+          access_token: connectForm.access_token,
+          refresh_token: connectForm.refresh_token,
+          expires_at: connectForm.expires_at ? new Date(connectForm.expires_at).toISOString() : undefined,
+          scopes: connectForm.scopes
+        })
+      });
+      setConnectForm({ ...connectForm, access_token: "", refresh_token: "" });
+      setResult("Teams connection saved.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to connect Teams");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const loadTeams = async () => {
+    setBusy("load-teams");
+    setError("");
+    try {
+      setTeamOptions(await apiFetch<DirectoryEntry[]>("/integrations/teams/lookup/teams"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load teams");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const loadChannels = async (teamId: string) => {
+    if (!teamId) {
+      setChannelOptions([]);
+      return;
+    }
+    setBusy("load-channels");
+    setError("");
+    try {
+      setChannelOptions(await apiFetch<DirectoryEntry[]>(`/integrations/teams/lookup/teams/${teamId}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load channels");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const searchUsers = async () => {
+    setBusy("search-users");
+    setError("");
+    try {
+      setUserResults(await apiFetch<DirectoryEntry[]>(`/integrations/teams/lookup/users${buildQuery({ q: userQuery })}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to search users");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const loadTags = async (teamId: string) => {
+    if (!teamId) {
+      setTagResults([]);
+      return;
+    }
+    setBusy("load-tags");
+    setError("");
+    try {
+      setTagResults(await apiFetch<DirectoryEntry[]>(`/integrations/teams/lookup/tags${buildQuery({ team_id: teamId })}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load tags");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const addRecipient = (recipient: TeamsRouteRecipient) => {
+    const exists = routeForm.recipients.some((current) => current.type === recipient.type && current.teams_object_id === recipient.teams_object_id);
+    if (exists) {
+      return;
+    }
+    setRouteForm({ ...routeForm, recipients: [...routeForm.recipients, recipient] });
+  };
+
+  const removeRecipient = (recipient: TeamsRouteRecipient) => {
+    setRouteForm({
+      ...routeForm,
+      recipients: routeForm.recipients.filter((current) => !(current.type === recipient.type && current.teams_object_id === recipient.teams_object_id))
+    });
+  };
+
+  const resetRouteForm = () => {
+    setRouteForm(emptyTeamsRouteForm);
+    setChannelOptions([]);
+    setUserResults([]);
+    setTagResults([]);
+  };
+
+  const saveRoute = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy("save-route");
+    setError("");
+    setResult("");
+    const payload = {
+      name: routeForm.name,
+      enabled: routeForm.enabled,
+      team_id: routeForm.team_id,
+      team_name: routeForm.team_name,
+      channel_id: routeForm.channel_id,
+      channel_name: routeForm.channel_name,
+      owner_team: routeForm.owner_team,
+      service: routeForm.service,
+      environment: routeForm.environment,
+      severity_min: routeForm.severity_min,
+      recipients: routeForm.recipients.map((recipient) => ({
+        type: recipient.type,
+        teams_object_id: recipient.teams_object_id,
+        display_name: recipient.display_name,
+        upn: recipient.upn
+      }))
+    };
+    try {
+      if (routeForm.id) {
+        await apiFetch(`/integrations/teams/routes/${routeForm.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload)
+        });
+        setResult("Teams route updated.");
+      } else {
+        await apiFetch("/integrations/teams/routes", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        setResult("Teams route created.");
+      }
+      resetRouteForm();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save route");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const deleteRoute = async (id: string) => {
+    setBusy(`delete-${id}`);
+    setError("");
+    setResult("");
+    try {
+      await apiFetch(`/integrations/teams/routes/${id}`, { method: "DELETE" });
+      if (routeForm.id === id) {
+        resetRouteForm();
+      }
+      setResult("Teams route deleted.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete route");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const testRoute = async (id: string) => {
+    setBusy(`route-test-${id}`);
+    setError("");
+    setResult("");
+    try {
+      await apiFetch(`/integrations/teams/routes/${id}/test`, { method: "POST" });
+      setResult("Teams route test sent.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to test Teams route");
+      await load();
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const editRoute = async (route: TeamsRoute) => {
+    setRouteForm(routeToForm(route));
+    if (route.team_id) {
+      await loadChannels(route.team_id);
+      await loadTags(route.team_id);
     }
   };
 
@@ -835,12 +1144,205 @@ function IntegrationsWorkspace() {
                 ["Enabled", status.enabled ? "yes" : "no"],
                 ["Configured", status.configured ? "yes" : "no"],
                 ["Base URL", status.base_url ?? "-"],
-                ["Project", status.project_key ?? "-"]
+                ["Project", status.project_key ?? "-"],
+                ["Connected", status.connected ? "yes" : "no"],
+                ["Sender", status.sender_display_name ?? "-"],
+                ["Sender UPN", status.sender_upn ?? "-"]
               ]}
             />
-            {status.name === "jira" && <button type="button" onClick={() => void testJIRA()}>Test</button>}
+            {status.name === "jira" && <button type="button" onClick={() => void testJIRA()} disabled={busy !== ""}>Test</button>}
+            {status.name === "teams" && <button type="button" onClick={() => void testTeams()} disabled={busy !== ""}>Test</button>}
           </section>
         ))}
+      </div>
+
+      <section className="table-panel">
+        <header className="panel-header">
+          <h2>Teams Connection</h2>
+          <div className="action-group">
+            <button type="button" onClick={() => void loadTeams()} disabled={busy !== ""}>Load Teams</button>
+            <button type="button" onClick={() => void testTeams()} disabled={busy !== ""}>Verify</button>
+          </div>
+        </header>
+        <form className="create-row integration-form" onSubmit={(event) => void connectTeams(event)}>
+          <input
+            required
+            value={connectForm.access_token}
+            placeholder="Access token"
+            onChange={(e) => setConnectForm({ ...connectForm, access_token: e.target.value })}
+          />
+          <input
+            value={connectForm.refresh_token}
+            placeholder="Refresh token"
+            onChange={(e) => setConnectForm({ ...connectForm, refresh_token: e.target.value })}
+          />
+          <input
+            value={connectForm.scopes}
+            placeholder="Scopes"
+            onChange={(e) => setConnectForm({ ...connectForm, scopes: e.target.value })}
+          />
+          <input
+            type="datetime-local"
+            value={connectForm.expires_at}
+            onChange={(e) => setConnectForm({ ...connectForm, expires_at: e.target.value })}
+          />
+          <button type="submit" disabled={busy !== ""}>Save Connection</button>
+        </form>
+        {teamsStatus && (
+          <small>
+            Tenant: {teamsStatus.tenant_id ?? "-"} / Connected: {teamsStatus.connected ? "yes" : "no"}
+          </small>
+        )}
+      </section>
+
+      <div className="split-layout integrations-layout">
+        <section className="table-panel">
+          <header className="panel-header">
+            <h2>Teams Routes</h2>
+            <span>{routes.length} configured</span>
+          </header>
+          {routes.length === 0 && !loading ? (
+            <EmptyState label="No Teams routes configured." />
+          ) : (
+            <div className="event-table">
+              {routes.map((route) => (
+                <div key={route.id} className="event-row">
+                  <span className={`pill ${route.enabled ? "open" : "resolved"}`}>{route.enabled ? "enabled" : "disabled"}</span>
+                  <strong>{route.name}</strong>
+                  <span>{route.team_name || route.team_id}</span>
+                  <span>{route.channel_name || route.channel_id}</span>
+                  <span>{route.recipients.length} recipients</span>
+                  <div className="action-group">
+                    <button type="button" onClick={() => void editRoute(route)} disabled={busy !== ""}>Edit</button>
+                    <button type="button" onClick={() => void testRoute(route.id)} disabled={busy !== ""}>Test</button>
+                    <button type="button" onClick={() => void deleteRoute(route.id)} disabled={busy !== ""}>Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="detail-panel">
+          <header className="panel-header">
+            <h2>{routeForm.id ? "Edit Teams Route" : "New Teams Route"}</h2>
+            {routeForm.id && <button type="button" onClick={resetRouteForm}>Clear</button>}
+          </header>
+          <form className="integration-editor" onSubmit={(event) => void saveRoute(event)}>
+            <input required value={routeForm.name} placeholder="Route name" onChange={(e) => setRouteForm({ ...routeForm, name: e.target.value })} />
+            <label className="checkbox-row">
+              <input type="checkbox" checked={routeForm.enabled} onChange={(e) => setRouteForm({ ...routeForm, enabled: e.target.checked })} />
+              Enabled
+            </label>
+            <div className="filters-row">
+              <select
+                value={routeForm.team_id}
+                onChange={(e) => {
+                  const selected = teamOptions.find((team) => team.id === e.target.value);
+                  setRouteForm({
+                    ...routeForm,
+                    team_id: e.target.value,
+                    team_name: selected?.display_name ?? "",
+                    channel_id: "",
+                    channel_name: ""
+                  });
+                  void loadChannels(e.target.value);
+                  void loadTags(e.target.value);
+                }}
+              >
+                <option value="">Team</option>
+                {teamOptions.map((team) => (
+                  <option key={team.id} value={team.id}>{team.display_name}</option>
+                ))}
+              </select>
+              <select
+                value={routeForm.channel_id}
+                onChange={(e) => {
+                  const selected = channelOptions.find((channel) => channel.id === e.target.value);
+                  setRouteForm({
+                    ...routeForm,
+                    channel_id: e.target.value,
+                    channel_name: selected?.display_name ?? ""
+                  });
+                }}
+              >
+                <option value="">Channel</option>
+                {channelOptions.map((channel) => (
+                  <option key={channel.id} value={channel.id}>{channel.display_name}</option>
+                ))}
+              </select>
+              <input value={routeForm.owner_team} placeholder="Owner team filter" onChange={(e) => setRouteForm({ ...routeForm, owner_team: e.target.value })} />
+              <input value={routeForm.service} placeholder="Service filter" onChange={(e) => setRouteForm({ ...routeForm, service: e.target.value })} />
+              <input value={routeForm.environment} placeholder="Environment filter" onChange={(e) => setRouteForm({ ...routeForm, environment: e.target.value })} />
+              <select value={routeForm.severity_min} onChange={(e) => setRouteForm({ ...routeForm, severity_min: e.target.value })}>
+                <option value="">Min severity</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+
+            <div className="detail-columns">
+              <section>
+                <h3>Recipients</h3>
+                {routeForm.recipients.length === 0 ? (
+                  <EmptyState label="No recipients selected." compact />
+                ) : (
+                  <div className="event-table">
+                    {routeForm.recipients.map((recipient) => (
+                      <div key={`${recipient.type}-${recipient.teams_object_id}`} className="event-row">
+                        <span className={`pill ${recipient.type === "user" ? "acknowledged" : "open"}`}>{recipient.type}</span>
+                        <strong>{recipient.display_name}</strong>
+                        <span>{recipient.upn ?? recipient.teams_object_id}</span>
+                        <button type="button" onClick={() => removeRecipient(recipient)}>Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <h3>User Search</h3>
+                <div className="filters-row">
+                  <input value={userQuery} placeholder="Search users" onChange={(e) => setUserQuery(e.target.value)} />
+                  <button type="button" onClick={() => void searchUsers()} disabled={busy !== ""}>Search</button>
+                  <button type="button" onClick={() => void loadTags(routeForm.team_id)} disabled={busy !== "" || !routeForm.team_id}>Load Tags</button>
+                </div>
+                <div className="event-table">
+                  {userResults.map((user) => (
+                    <div key={user.id} className="event-row">
+                      <strong>{user.display_name}</strong>
+                      <span>{user.upn ?? "-"}</span>
+                      <button
+                        type="button"
+                        onClick={() => addRecipient({ type: "user", teams_object_id: user.id, display_name: user.display_name, upn: user.upn })}
+                      >
+                        Add
+                      </button>
+                    </div>
+                  ))}
+                  {tagResults.map((tag) => (
+                    <div key={tag.id} className="event-row">
+                      <strong>{tag.display_name}</strong>
+                      <span>{tag.description ?? "Teams tag"}</span>
+                      <button
+                        type="button"
+                        onClick={() => addRecipient({ type: "tag", teams_object_id: tag.id, display_name: tag.display_name })}
+                      >
+                        Add Tag
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            <button type="submit" disabled={busy !== "" || routeForm.recipients.length === 0}>
+              {routeForm.id ? "Update Route" : "Create Route"}
+            </button>
+          </form>
+        </section>
       </div>
 
       <section className="table-panel">

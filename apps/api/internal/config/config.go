@@ -16,6 +16,7 @@ type Config struct {
 	APIAuthToken       string
 	RateLimit          RateLimitConfig
 	JIRA               JIRAConfig
+	Teams              TeamsConfig
 	Dynatrace          SourceConfig
 	ELK                SourceConfig
 	Webhooks           WebhookConfig
@@ -38,12 +39,22 @@ type SourceConfig struct {
 	Enabled bool
 }
 
+type TeamsConfig struct {
+	Enabled            bool
+	TenantID           string
+	ClientID           string
+	ClientSecret       string
+	TokenEncryptionKey string
+}
+
 type WebhookConfig struct {
 	DynatraceSecret  string
 	ELKSecret        string
 	GenericSecret    string
 	DeploymentSecret string
 }
+
+type WebhookSecrets = WebhookConfig
 
 type RateLimitConfig struct {
 	APIRequestsPerMinute     int
@@ -75,6 +86,13 @@ func Load() (Config, error) {
 			ResolutionField:         getEnv("JIRA_RESOLUTION_FIELD", "resolution"),
 			ResolutionValue:         getEnv("JIRA_RESOLUTION_VALUE", "Done"),
 		},
+		Teams: TeamsConfig{
+			Enabled:            getBoolEnv("TEAMS_ENABLED", false),
+			TenantID:           os.Getenv("TEAMS_TENANT_ID"),
+			ClientID:           os.Getenv("TEAMS_CLIENT_ID"),
+			ClientSecret:       os.Getenv("TEAMS_CLIENT_SECRET"),
+			TokenEncryptionKey: os.Getenv("TEAMS_TOKEN_ENCRYPTION_KEY"),
+		},
 		Dynatrace: SourceConfig{
 			Enabled: getBoolEnv("DYNATRACE_ENABLED", true),
 		},
@@ -104,6 +122,20 @@ func Load() (Config, error) {
 		}
 		if cfg.JIRA.ProjectKey == "" {
 			return Config{}, fmt.Errorf("JIRA_PROJECT_KEY is required when JIRA_ENABLED=true")
+		}
+	}
+	if cfg.Teams.Enabled {
+		if cfg.Teams.TenantID == "" {
+			return Config{}, fmt.Errorf("TEAMS_TENANT_ID is required when TEAMS_ENABLED=true")
+		}
+		if cfg.Teams.ClientID == "" {
+			return Config{}, fmt.Errorf("TEAMS_CLIENT_ID is required when TEAMS_ENABLED=true")
+		}
+		if cfg.Teams.ClientSecret == "" {
+			return Config{}, fmt.Errorf("TEAMS_CLIENT_SECRET is required when TEAMS_ENABLED=true")
+		}
+		if cfg.Teams.TokenEncryptionKey == "" {
+			return Config{}, fmt.Errorf("TEAMS_TOKEN_ENCRYPTION_KEY is required when TEAMS_ENABLED=true")
 		}
 	}
 

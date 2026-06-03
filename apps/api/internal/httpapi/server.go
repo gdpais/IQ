@@ -20,6 +20,7 @@ import (
 	"incidentiq/apps/api/internal/incident"
 	"incidentiq/apps/api/internal/jira"
 	"incidentiq/apps/api/internal/reporting"
+	"incidentiq/apps/api/internal/teams"
 	"incidentiq/apps/api/internal/tickettemplate"
 
 	"github.com/google/uuid"
@@ -34,6 +35,7 @@ type Server struct {
 	redis     *redis.Client
 	incident  *incident.Repository
 	jira      *jira.Client
+	teams     *teams.Client
 	reporting *reporting.Repository
 	templates *tickettemplate.Repository
 	mux       *http.ServeMux
@@ -48,6 +50,7 @@ func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server
 		redis:     redisClient,
 		incident:  incident.NewRepository(db),
 		jira:      jira.NewClient(cfg.JIRA, nil),
+		teams:     teams.NewClient(cfg.Teams, nil),
 		reporting: reporting.NewRepository(db),
 		templates: tickettemplate.NewRepository(db),
 		mux:       http.NewServeMux(),
@@ -252,6 +255,7 @@ func (s *Server) handleIncidentsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.syncIncidentToJIRA(r.Context(), out, "incident_created")
+	s.enqueueTeamsNotifications(r.Context(), out.ID, incident.TeamsQueueReasonIncidentOpened)
 	if err := s.auditAction(r.Context(), req.Actor, "incident_created", "incident", out.ID, map[string]any{"severity": out.Severity, "service": out.Service}); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -355,6 +359,9 @@ func (s *Server) handleTransition(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 	s.syncIncidentToJIRA(r.Context(), out, "incident_"+string(status))
+	if status == incident.StatusOpen {
+		s.enqueueTeamsNotifications(r.Context(), out.ID, incident.TeamsQueueReasonIncidentReopen)
+	}
 	if err := s.auditAction(r.Context(), actor, "incident_"+string(status), "incident", out.ID, map[string]any{"status": out.Status}); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -472,6 +479,9 @@ func (s *Server) handleAlertWebhook(w http.ResponseWriter, r *http.Request, sour
 	if result.CreatedIncident || result.Correlated {
 		s.syncIncidentToJIRA(r.Context(), result.Incident, "alert_ingested")
 	}
+	if result.CreatedIncident {
+		s.enqueueTeamsNotifications(r.Context(), result.Incident.ID, incident.TeamsQueueReasonIncidentOpened)
+	}
 	if err := s.auditAction(r.Context(), source, "alert_ingested", "incident", result.Incident.ID, map[string]any{"alert_id": result.Alert.ID, "duplicate": result.Duplicate, "correlated": result.Correlated}); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -480,44 +490,46 @@ func (s *Server) handleAlertWebhook(w http.ResponseWriter, r *http.Request, sour
 }
 
 func (s *Server) handleIntegrationsList(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, []jira.Status{s.jira.Status()})
+	state, _ := s.incident.GetTeamsAuthState(context.Background())
+	writeJSON(w, http.StatusOK, []map[string]any{
+		{
+			"name":        "jira",
+			"enabled":     s.jira.Status().Enabled,
+			"configured":  s.jira.Status().Configured,
+			"base_url":    s.jira.Status().BaseURL,
+			"project_key": s.jira.Status().ProjectKey,
+		},
+		{
+			"name":                incident.TeamsIntegrationName,
+			"enabled":             s.teams.Status(state).Enabled,
+			"configured":          s.teams.Status(state).Configured,
+			"connected":           s.teams.Status(state).Connected,
+			"sender_display_name": s.teams.Status(state).SenderDisplay,
+			"sender_upn":          s.teams.Status(state).SenderUPN,
+			"tenant_id":           s.teams.Status(state).TenantID,
+		},
+	})
 }
 
 func (s *Server) handleIntegrationByPath(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/integrations/")
 	path = strings.Trim(path, "/")
 	parts := strings.Split(path, "/")
-	if len(parts) != 2 || parts[0] != "jira" || parts[1] != "test" || r.Method != http.MethodPost {
+	if len(parts) < 2 {
 		http.NotFound(w, r)
 		return
 	}
-
-	result, err := s.jira.Test(r.Context())
-	status := "completed"
-	code := http.StatusOK
-	if err != nil {
-		status = "failed"
-		code = http.StatusBadGateway
-		result.Success = false
-		result.Message = err.Error()
-	}
-
-	_, _ = s.incident.CreateIntegrationEvent(r.Context(), incident.CreateIntegrationEventRequest{
-		IntegrationName: "jira",
-		Type:            "connectivity_test",
-		Status:          status,
-		Payload: map[string]any{
-			"success":     result.Success,
-			"status_code": result.StatusCode,
-			"message":     result.Message,
-		},
-	})
-	if err := s.auditAction(r.Context(), actorFromRequest(r), "integration_tested", "integration", "jira", map[string]any{"success": result.Success, "status": status}); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+	switch parts[0] {
+	case "jira":
+		if len(parts) == 2 && parts[1] == "test" && r.Method == http.MethodPost {
+			s.handleJIRAIntegrationTest(w, r)
+			return
+		}
+	case "teams":
+		s.handleTeamsIntegrationByPath(w, r, parts[1:])
 		return
 	}
-
-	writeJSON(w, code, result)
+	http.NotFound(w, r)
 }
 
 func (s *Server) handleIntegrationEventsList(w http.ResponseWriter, r *http.Request) {
@@ -563,6 +575,407 @@ func (s *Server) handleJIRASync(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleJIRAIntegrationTest(w http.ResponseWriter, r *http.Request) {
+	result, err := s.jira.Test(r.Context())
+	status := "completed"
+	code := http.StatusOK
+	if err != nil {
+		status = "failed"
+		code = http.StatusBadGateway
+		result.Success = false
+		result.Message = err.Error()
+	}
+
+	_, _ = s.incident.CreateIntegrationEvent(r.Context(), incident.CreateIntegrationEventRequest{
+		IntegrationName: "jira",
+		Type:            "connectivity_test",
+		Status:          status,
+		Payload: map[string]any{
+			"success":     result.Success,
+			"status_code": result.StatusCode,
+			"message":     result.Message,
+		},
+	})
+	if err := s.auditAction(r.Context(), actorFromRequest(r), "integration_tested", "integration", "jira", map[string]any{"success": result.Success, "status": status}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, code, result)
+}
+
+func (s *Server) handleTeamsIntegrationByPath(w http.ResponseWriter, r *http.Request, parts []string) {
+	switch {
+	case len(parts) == 1 && parts[0] == "connect" && r.Method == http.MethodPost:
+		s.handleTeamsConnect(w, r)
+	case len(parts) == 1 && parts[0] == "test" && r.Method == http.MethodPost:
+		s.handleTeamsTest(w, r)
+	case len(parts) == 1 && parts[0] == "routes" && r.Method == http.MethodGet:
+		s.handleTeamsRoutesList(w, r)
+	case len(parts) == 1 && parts[0] == "routes" && r.Method == http.MethodPost:
+		s.handleTeamsRouteCreate(w, r)
+	case len(parts) == 2 && parts[0] == "routes" && r.Method == http.MethodPatch:
+		s.handleTeamsRoutePatch(w, r, parts[1])
+	case len(parts) == 2 && parts[0] == "routes" && r.Method == http.MethodDelete:
+		s.handleTeamsRouteDelete(w, r, parts[1])
+	case len(parts) == 3 && parts[0] == "routes" && parts[2] == "test" && r.Method == http.MethodPost:
+		s.handleTeamsRouteTest(w, r, parts[1])
+	case len(parts) == 2 && parts[0] == "teams" && parts[1] == "":
+		http.NotFound(w, r)
+	case len(parts) == 2 && parts[0] == "lookup" && parts[1] == "teams" && r.Method == http.MethodGet:
+		s.handleTeamsLookupTeams(w, r)
+	case len(parts) == 2 && parts[0] == "lookup" && parts[1] == "users" && r.Method == http.MethodGet:
+		s.handleTeamsLookupUsers(w, r)
+	case len(parts) == 2 && parts[0] == "lookup" && parts[1] == "tags" && r.Method == http.MethodGet:
+		s.handleTeamsLookupTags(w, r)
+	case len(parts) == 3 && parts[0] == "lookup" && parts[1] == "teams" && parts[2] != "" && r.Method == http.MethodGet:
+		s.handleTeamsLookupChannels(w, r, parts[2])
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) handleTeamsConnect(w http.ResponseWriter, r *http.Request) {
+	var req teams.ConnectRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	state, err := s.teams.Connect(r.Context(), req)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	stored, err := s.incident.UpsertTeamsAuthState(r.Context(), state)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	_, _ = s.incident.CreateIntegrationEvent(r.Context(), incident.CreateIntegrationEventRequest{
+		IntegrationName: incident.TeamsIntegrationName,
+		Type:            "connected",
+		Status:          "completed",
+		Payload: map[string]any{
+			"sender_display_name": stored.SenderDisplay,
+			"sender_upn":          stored.SenderUPN,
+		},
+	})
+	if err := s.auditAction(r.Context(), actorFromRequest(r), "integration_connected", "integration", incident.TeamsIntegrationName, map[string]any{"sender_upn": stored.SenderUPN}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"connected": true, "sender_display_name": stored.SenderDisplay, "sender_upn": stored.SenderUPN})
+}
+
+func (s *Server) handleTeamsTest(w http.ResponseWriter, r *http.Request) {
+	state, err := s.incident.GetTeamsAuthState(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	result, err := s.teams.Test(r.Context(), state)
+	status := "completed"
+	code := http.StatusOK
+	if state != nil {
+		_ = s.persistTeamsAuthStateIfNeeded(r.Context(), state)
+	}
+	if err != nil {
+		status = "failed"
+		code = http.StatusBadGateway
+		result.Success = false
+		result.Message = err.Error()
+	}
+	_, _ = s.incident.CreateIntegrationEvent(r.Context(), incident.CreateIntegrationEventRequest{
+		IntegrationName: incident.TeamsIntegrationName,
+		Type:            "connectivity_test",
+		Status:          status,
+		Payload: map[string]any{
+			"success": result.Success,
+			"message": result.Message,
+		},
+	})
+	writeJSON(w, code, result)
+}
+
+func (s *Server) handleTeamsRoutesList(w http.ResponseWriter, r *http.Request) {
+	out, err := s.incident.ListTeamsRoutes(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleTeamsRouteCreate(w http.ResponseWriter, r *http.Request) {
+	var req incident.CreateTeamsRouteRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Actor = actorFromRequest(r)
+	out, err := s.incident.CreateTeamsRoute(r.Context(), req)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	_, _ = s.incident.CreateIntegrationEvent(r.Context(), incident.CreateIntegrationEventRequest{
+		IntegrationName: incident.TeamsIntegrationName,
+		Type:            "route_created",
+		Status:          "completed",
+		Payload:         map[string]any{"route_id": out.ID, "name": out.Name},
+	})
+	writeJSON(w, http.StatusCreated, out)
+}
+
+func (s *Server) handleTeamsRoutePatch(w http.ResponseWriter, r *http.Request, id string) {
+	var req incident.UpdateTeamsRouteRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Actor = actorFromRequest(r)
+	out, err := s.incident.UpdateTeamsRoute(r.Context(), id, req)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	_, _ = s.incident.CreateIntegrationEvent(r.Context(), incident.CreateIntegrationEventRequest{
+		IntegrationName: incident.TeamsIntegrationName,
+		Type:            "route_updated",
+		Status:          "completed",
+		Payload:         map[string]any{"route_id": out.ID, "name": out.Name},
+	})
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleTeamsRouteDelete(w http.ResponseWriter, r *http.Request, id string) {
+	if err := s.incident.DeleteTeamsRoute(r.Context(), id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	_, _ = s.incident.CreateIntegrationEvent(r.Context(), incident.CreateIntegrationEventRequest{
+		IntegrationName: incident.TeamsIntegrationName,
+		Type:            "route_deleted",
+		Status:          "completed",
+		Payload:         map[string]any{"route_id": id},
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+func (s *Server) handleTeamsRouteTest(w http.ResponseWriter, r *http.Request, id string) {
+	route, err := s.incident.GetTeamsRoute(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if route == nil {
+		writeErr(w, http.StatusNotFound, errors.New("route not found"))
+		return
+	}
+	inc := incident.Incident{
+		ID:          "teams-test",
+		Title:       "Teams route test",
+		Summary:     "Teams route test message from IncidentIQ.",
+		Severity:    "high",
+		Service:     firstNonEmpty(route.Service, "test-service"),
+		Environment: firstNonEmpty(route.Environment, "prod"),
+		OwnerTeam:   firstNonEmpty(route.OwnerTeam, "sre"),
+		Status:      incident.StatusOpen,
+		StartedAt:   time.Now().UTC(),
+	}
+	detail := incident.IncidentDetail{Incident: inc}
+	body, mentions := teams.BuildPage(detail, route.Recipients)
+	state, err := s.incident.GetTeamsAuthState(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	result, updated, err := s.teams.SendChannelMessage(r.Context(), state, route.TeamID, route.ChannelID, body, mentions)
+	if updated != nil {
+		if _, persistErr := s.incident.UpsertTeamsAuthState(r.Context(), *updated); persistErr == nil {
+			_, _ = s.incident.GetTeamsAuthState(r.Context())
+		}
+	}
+	status := "completed"
+	code := http.StatusOK
+	if err != nil {
+		status = "failed"
+		code = http.StatusBadGateway
+	}
+	_, _ = s.incident.CreateIntegrationEvent(r.Context(), incident.CreateIntegrationEventRequest{
+		IntegrationName: incident.TeamsIntegrationName,
+		Type:            "route_test",
+		Status:          status,
+		Payload: map[string]any{
+			"route_id":    route.ID,
+			"channel_id":  route.ChannelID,
+			"message_id":  result.ID,
+			"successful":  err == nil,
+			"error":       errorString(err),
+		},
+	})
+	if err != nil {
+		writeErr(w, code, err)
+		return
+	}
+	writeJSON(w, code, map[string]any{"success": true, "message_id": result.ID})
+}
+
+func (s *Server) handleTeamsLookupTeams(w http.ResponseWriter, r *http.Request) {
+	state, err := s.incident.GetTeamsAuthState(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	out, updated, err := s.teams.ListTeams(r.Context(), state)
+	if updated != nil {
+		_, _ = s.incident.UpsertTeamsAuthState(r.Context(), *updated)
+	}
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleTeamsLookupChannels(w http.ResponseWriter, r *http.Request, teamID string) {
+	state, err := s.incident.GetTeamsAuthState(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	out, updated, err := s.teams.ListChannels(r.Context(), state, teamID)
+	if updated != nil {
+		_, _ = s.incident.UpsertTeamsAuthState(r.Context(), *updated)
+	}
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleTeamsLookupUsers(w http.ResponseWriter, r *http.Request) {
+	state, err := s.incident.GetTeamsAuthState(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	out, updated, err := s.teams.SearchUsers(r.Context(), state, r.URL.Query().Get("q"))
+	if updated != nil {
+		_, _ = s.incident.UpsertTeamsAuthState(r.Context(), *updated)
+	}
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleTeamsLookupTags(w http.ResponseWriter, r *http.Request) {
+	teamID := strings.TrimSpace(r.URL.Query().Get("team_id"))
+	if teamID == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("team_id is required"))
+		return
+	}
+	state, err := s.incident.GetTeamsAuthState(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	out, updated, err := s.teams.ListTags(r.Context(), state, teamID)
+	if updated != nil {
+		_, _ = s.incident.UpsertTeamsAuthState(r.Context(), *updated)
+	}
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) enqueueTeamsNotifications(ctx context.Context, incidentID string, reason incident.TeamsQueueReason) {
+	if !s.cfg.Teams.Enabled {
+		return
+	}
+	inc, err := s.incident.Get(ctx, incidentID)
+	if err != nil {
+		return
+	}
+	routes, err := s.incident.MatchTeamsRoutes(ctx, inc)
+	if err != nil || len(routes) == 0 {
+		return
+	}
+	type queuedChannel struct {
+		TeamID      string
+		TeamName    string
+		ChannelID   string
+		ChannelName string
+		Recipients  []map[string]any
+		RouteIDs    []string
+	}
+	channels := map[string]*queuedChannel{}
+	seenRecipients := map[string]map[string]bool{}
+	for _, route := range routes {
+		key := route.TeamID + ":" + route.ChannelID
+		if channels[key] == nil {
+			channels[key] = &queuedChannel{
+				TeamID:      route.TeamID,
+				TeamName:    route.TeamName,
+				ChannelID:   route.ChannelID,
+				ChannelName: route.ChannelName,
+			}
+			seenRecipients[key] = map[string]bool{}
+		}
+		channels[key].RouteIDs = append(channels[key].RouteIDs, route.ID)
+		for _, recipient := range route.Recipients {
+			rKey := recipient.Type + ":" + recipient.TeamsObjectID
+			if seenRecipients[key][rKey] {
+				continue
+			}
+			seenRecipients[key][rKey] = true
+			channels[key].Recipients = append(channels[key].Recipients, map[string]any{
+				"type":            recipient.Type,
+				"teams_object_id": recipient.TeamsObjectID,
+				"display_name":    recipient.DisplayName,
+				"upn":             recipient.UPN,
+			})
+		}
+	}
+	for _, channel := range channels {
+		_, _ = s.incident.CreateIntegrationEvent(ctx, incident.CreateIntegrationEventRequest{
+			IntegrationName: incident.TeamsIntegrationName,
+			Type:            "page_" + string(reason),
+			Status:          "pending",
+			Payload: map[string]any{
+				"incident_id":  incidentID,
+				"reason":       string(reason),
+				"team_id":      channel.TeamID,
+				"team_name":    channel.TeamName,
+				"channel_id":   channel.ChannelID,
+				"channel_name": channel.ChannelName,
+				"route_ids":    channel.RouteIDs,
+				"recipients":   channel.Recipients,
+			},
+		})
+	}
+}
+
+func (s *Server) persistTeamsAuthStateIfNeeded(ctx context.Context, state *incident.TeamsAuthState) error {
+	if state == nil {
+		return nil
+	}
+	_, err := s.incident.UpsertTeamsAuthState(ctx, incident.UpsertTeamsAuthStateRequest{
+		SenderDisplay: state.SenderDisplay,
+		SenderUPN:     state.SenderUPN,
+		AccessToken:   state.AccessToken,
+		RefreshToken:  state.RefreshToken,
+		Scopes:        state.Scopes,
+		ExpiresAt:     state.ExpiresAt,
+	})
+	return err
 }
 
 type ticketTemplateValidateRequest struct {
@@ -913,6 +1326,22 @@ func actorFromRequest(r *http.Request) string {
 		return role
 	}
 	return "system"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func decodeJSON(r *http.Request, out any) error {

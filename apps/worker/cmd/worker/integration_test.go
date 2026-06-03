@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -47,6 +48,7 @@ func workerTestSetup(t *testing.T) (*pgxpool.Pool, *redis.Client, func()) {
 
 	// Apply up migration
 	applyMigrationWorker(t, pool, "0001_init.up.sql")
+	applyMigrationWorker(t, pool, "0002_teams_paging.up.sql")
 
 	redisClient := redis.NewClient(&redis.Options{Addr: redisAddr})
 	if err := redisClient.Ping(ctx).Err(); err != nil {
@@ -55,6 +57,7 @@ func workerTestSetup(t *testing.T) (*pgxpool.Pool, *redis.Client, func()) {
 	}
 
 	return pool, redisClient, func() {
+		applyMigrationWorker(t, pool, "0002_teams_paging.down.sql")
 		applyMigrationWorker(t, pool, "0001_init.down.sql")
 		pool.Close()
 		_ = redisClient.Close()
@@ -282,6 +285,82 @@ func TestIntegrationWorkerExhaustsRetriesAndMarksFailed(t *testing.T) {
 	}
 }
 
+func TestIntegrationWorkerProcessesTeamsPageAndDedupesDelivery(t *testing.T) {
+	pool, redisClient, cleanup := workerTestSetup(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	graphCalls := 0
+	mockGraph := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		graphCalls++
+		if r.Method == http.MethodPost && r.URL.Path == "/v1.0/teams/team-1/channels/channel-1/messages" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprint(w, `{"id":"message-1"}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockGraph.Close()
+
+	incidentID := insertTestIncident(t, pool)
+	encryptedAccess, err := encrypt("teams-secret", "access-token")
+	if err != nil {
+		t.Fatalf("encrypt access token: %v", err)
+	}
+	_, err = pool.Exec(ctx, `
+		INSERT INTO teams_auth_state (integration_name, sender_display_name, sender_upn, access_token_encrypted, refresh_token_encrypted, scopes, expires_at, created_at, updated_at)
+		VALUES ('teams', 'Incident Bot', 'incident-bot@example.com', $1, '', 'offline_access', NOW() + INTERVAL '1 hour', NOW(), NOW())
+	`, encryptedAccess)
+	if err != nil {
+		t.Fatalf("insert teams auth state: %v", err)
+	}
+
+	payload, _ := json.Marshal(map[string]any{
+		"incident_id": incidentID,
+		"reason":      "incident_opened",
+		"team_id":     "team-1",
+		"channel_id":  "channel-1",
+		"recipients": []map[string]any{
+			{"type": "user", "teams_object_id": "user-1", "display_name": "Alice"},
+		},
+	})
+	for i := 0; i < 2; i++ {
+		_, err = pool.Exec(ctx, `
+			INSERT INTO integration_events (id, integration_name, event_type, status, payload, attempts, next_retry_at, created_at, updated_at)
+			VALUES ($1, 'teams', 'page_incident_opened', 'pending', $2, 0, NOW() - INTERVAL '1 second', NOW(), NOW())
+		`, fmt.Sprintf("teams-evt-%d-%d", time.Now().UnixNano(), i), payload)
+		if err != nil {
+			t.Fatalf("insert teams event: %v", err)
+		}
+	}
+
+	w := worker{
+		db:    pool,
+		redis: redisClient,
+		teams: teamsConfig{
+			Enabled:            true,
+			TokenEncryptionKey: "teams-secret",
+		},
+		http: rewriteClient(mockGraph.URL),
+	}
+
+	if err := w.processDueEvents(ctx); err != nil {
+		t.Fatalf("processDueEvents: %v", err)
+	}
+
+	var deliveryCount int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM incident_notification_deliveries WHERE incident_id = $1`, incidentID).Scan(&deliveryCount); err != nil {
+		t.Fatalf("query delivery count: %v", err)
+	}
+	if deliveryCount != 1 {
+		t.Fatalf("deliveryCount = %d, want 1", deliveryCount)
+	}
+	if graphCalls != 1 {
+		t.Fatalf("graphCalls = %d, want 1", graphCalls)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helper: build request body (not used for HTTP calls here, just for clarity)
 // ---------------------------------------------------------------------------
@@ -295,4 +374,23 @@ func newJSONRequest(method, url string, body any) *http.Request {
 	req, _ := http.NewRequest(method, url, bytes.NewReader(marshalJSON(body)))
 	req.Header.Set("Content-Type", "application/json")
 	return req
+}
+
+func rewriteClient(target string) *http.Client {
+	parsed, _ := url.Parse(target)
+	baseTransport := http.DefaultTransport
+	return &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			req.URL.Scheme = parsed.Scheme
+			req.URL.Host = parsed.Host
+			return baseTransport.RoundTrip(req)
+		}),
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
