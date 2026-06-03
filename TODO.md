@@ -172,6 +172,11 @@ This backlog is derived from the approved MVP plan and is organized for phased e
 - [x] E2E test proves alert-to-report workflow.
 - [x] MVP acceptance sign-off is possible with documented evidence.
 
+## Phase 9 - Cleanup and Refactoring
+
+- [ ] Remove github dependencies where possible.
+- [ ] Remove unused packages and dependencies.
+
 ## Out of Scope for This MVP
 
 - [ ] Playbooks and automated remediation execution.
