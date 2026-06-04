@@ -7,3 +7,4 @@ dist
 coverage
 bin
 worker
+apps/web/vite.config.ts.*
