@@ -1,3 +1,6 @@
+// Package main is the entry point for the IncidentIQ API server. It wires
+// together configuration, database, Redis, and the HTTP server, then listens
+// for SIGINT/SIGTERM to perform a graceful shutdown.
 package main
 
 import (

@@ -1,3 +1,7 @@
+// Package tickettemplate parses, validates, and renders YAML-based ticket
+// templates that map incident metadata to Jira issue fields. Templates support
+// a defaults section and per-scope overrides (service, team, severity) with
+// Go-style {{ variable }} interpolation.
 package tickettemplate
 
 import (
@@ -22,12 +26,15 @@ var allowedVariables = map[string]bool{
 
 var variablePattern = regexp.MustCompile(`{{\s*([a-zA-Z0-9_]+)\s*}}`)
 
+// Document is the top-level structure of a parsed ticket template YAML file.
 type Document struct {
 	Version   int        `json:"version" yaml:"version"`
 	Defaults  Fields     `json:"defaults" yaml:"defaults"`
 	Overrides []Override `json:"overrides,omitempty" yaml:"overrides"`
 }
 
+// Override specifies field values that replace the defaults when a scope
+// condition is satisfied.
 type Override struct {
 	Scope    Scope  `json:"scope" yaml:"scope"`
 	Template Fields `json:"template" yaml:"template"`
@@ -50,6 +57,8 @@ type Fields struct {
 	Comments     []string          `json:"comments,omitempty" yaml:"comments"`
 }
 
+// Context holds the incident-time values substituted into template variables
+// during rendering. All fields correspond to the allowed {{ variable }} names.
 type Context struct {
 	Severity     string `json:"severity"`
 	Service      string `json:"service"`
@@ -74,6 +83,8 @@ type Rendered struct {
 	Comments     []string          `json:"comments,omitempty"`
 }
 
+// Parse deserialises raw YAML into a Document. It does not validate field
+// constraints; call Validate for full validation.
 func Parse(raw string) (Document, error) {
 	var doc Document
 	if strings.TrimSpace(raw) == "" {
@@ -85,6 +96,10 @@ func Parse(raw string) (Document, error) {
 	return doc, nil
 }
 
+// Validate parses and validates raw YAML. It returns the parsed Document, a
+// (possibly empty) list of human-readable validation error strings, and a parse
+// error. A non-nil parse error means the YAML was malformed; validation errors
+// mean the YAML was valid but the template structure violated constraints.
 func Validate(raw string) (Document, []string, error) {
 	doc, err := Parse(raw)
 	if err != nil {
@@ -120,6 +135,10 @@ func Validate(raw string) (Document, []string, error) {
 	return doc, nil, nil
 }
 
+// Render validates the template then applies scope overrides and variable
+// substitution to produce a Rendered value ready for Jira issue creation.
+// Returns validation errors (non-nil slice) on invalid templates before
+// attempting rendering.
 func Render(raw string, ctx Context) (Rendered, []string, error) {
 	doc, validationErrors, err := Validate(raw)
 	if err != nil || len(validationErrors) > 0 {

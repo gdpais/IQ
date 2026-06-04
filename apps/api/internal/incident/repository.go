@@ -13,14 +13,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Repository provides database access for the incident domain. All mutations
+// that require atomicity (Create, Transition) run inside explicit transactions.
 type Repository struct {
 	db *pgxpool.Pool
 }
 
+// NewRepository constructs a Repository backed by the given connection pool.
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
+// Create inserts a new incident in StatusOpen and records an
+// "incident_created" event in the same transaction.
 func (r *Repository) Create(ctx context.Context, req CreateIncidentRequest) (Incident, error) {
 	id := uuid.NewString()
 	now := time.Now().UTC()
@@ -68,6 +73,9 @@ func (r *Repository) Get(ctx context.Context, id string) (Incident, error) {
 	return out, err
 }
 
+// GetDetail fetches the incident together with its events, alerts, and Jira
+// link in three sequential queries. It returns pgx.ErrNoRows if the incident
+// does not exist.
 func (r *Repository) GetDetail(ctx context.Context, id string) (IncidentDetail, error) {
 	inc, err := r.Get(ctx, id)
 	if err != nil {
@@ -97,6 +105,8 @@ func (r *Repository) GetDetail(ctx context.Context, id string) (IncidentDetail, 
 	}, nil
 }
 
+// List returns incidents matching the filter ordered by creation time
+// descending. Limit is clamped to [1, 200]; defaults to 50 if unset.
 func (r *Repository) List(ctx context.Context, filter IncidentListFilter) ([]Incident, error) {
 	if filter.Limit <= 0 || filter.Limit > 200 {
 		filter.Limit = 50
@@ -268,6 +278,9 @@ func (r *Repository) Patch(ctx context.Context, id string, req PatchIncidentRequ
 	return out, nil
 }
 
+// Transition moves an incident to target and records the corresponding event
+// atomically. It validates the transition via ValidateTransition before
+// touching the database.
 func (r *Repository) Transition(ctx context.Context, id string, target Status, actor string) (Incident, error) {
 	current, err := r.Get(ctx, id)
 	if err != nil {
@@ -340,6 +353,8 @@ func (r *Repository) Transition(ctx context.Context, id string, target Status, a
 	return out, nil
 }
 
+// InsertEvent appends a new event record to an incident's timeline. Use
+// insertEventTx when the call must participate in an existing transaction.
 func (r *Repository) InsertEvent(ctx context.Context, incidentID string, eventType string, actor string, payload map[string]any) error {
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO incident_events (id, incident_id, event_type, actor, payload, created_at)

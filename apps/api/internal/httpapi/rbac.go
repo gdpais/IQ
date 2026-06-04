@@ -6,13 +6,16 @@ import (
 	"strings"
 )
 
+// Role is a named access tier for the API. Roles are passed by the caller via
+// the X-Role request header and are trusted only after bearer-token
+// authentication has already been verified by withAuthorization.
 type Role string
 
 const (
-	RoleViewer    Role = "viewer"
-	RoleResponder Role = "responder"
-	RoleCommander Role = "commander"
-	RoleAdmin     Role = "admin"
+	RoleViewer    Role = "viewer"    // read-only access to all GET endpoints
+	RoleResponder Role = "responder" // viewer + incident lifecycle mutations
+	RoleCommander Role = "commander" // responder + snapshot materialisation
+	RoleAdmin     Role = "admin"     // full access including integrations
 )
 
 type roleKey struct{}
@@ -46,6 +49,9 @@ func isKnownRole(role Role) bool {
 	}
 }
 
+// roleAllowed reports whether role may execute method on path. All GET/HEAD/OPTIONS
+// requests are permitted regardless of role; write access is gated by the
+// permission matrix defined here.
 func roleAllowed(role Role, method string, path string) bool {
 	if role == RoleAdmin {
 		return true

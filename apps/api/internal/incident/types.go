@@ -1,3 +1,5 @@
+// Package incident defines the core domain types, lifecycle rules, and database
+// repository for incidents, alerts, and related integration state.
 package incident
 
 import (
@@ -5,6 +7,7 @@ import (
 	"time"
 )
 
+// Status represents the lifecycle state of an incident.
 type Status string
 
 const (
@@ -36,6 +39,7 @@ func ValidateTransition(from Status, to Status) error {
 	return nil
 }
 
+// Incident is the central domain object representing a production incident.
 type Incident struct {
 	ID             string     `json:"id"`
 	Title          string     `json:"title"`
@@ -52,6 +56,8 @@ type Incident struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
+// IncidentListFilter constrains the results returned by Repository.List.
+// Zero values are ignored (no filter applied).
 type IncidentListFilter struct {
 	Severity      string
 	Service       string
@@ -62,6 +68,8 @@ type IncidentListFilter struct {
 	Limit         int
 }
 
+// IncidentDetail is the full view of an incident including its timeline events,
+// correlated alerts, and optional Jira issue link.
 type IncidentDetail struct {
 	Incident Incident  `json:"incident"`
 	Events   []Event   `json:"events"`
@@ -69,6 +77,9 @@ type IncidentDetail struct {
 	JIRA     *JIRALink `json:"jira,omitempty"`
 }
 
+// Event records a discrete action or state change on an incident (e.g.
+// "incident_acknowledged", "incident_resolved"). It forms the audit trail shown
+// in the detail view.
 type Event struct {
 	ID         string         `json:"id"`
 	IncidentID string         `json:"incident_id"`
@@ -78,6 +89,9 @@ type Event struct {
 	CreatedAt  time.Time      `json:"created_at"`
 }
 
+// Alert is a normalized inbound signal from an external monitoring source. An
+// alert may create a new incident or be correlated to an existing one.
+// RedactedPayload strips sensitive keys before persisting to the database.
 type Alert struct {
 	ID              string         `json:"id"`
 	IncidentID      *string        `json:"incident_id,omitempty"`
@@ -92,6 +106,9 @@ type Alert struct {
 	CreatedAt       time.Time      `json:"created_at"`
 }
 
+// NormalizedAlert is the source-agnostic representation produced by
+// NormalizeAlert before the alert is persisted or matched against existing
+// incidents.
 type NormalizedAlert struct {
 	Source          string         `json:"source"`
 	SourceEventID   string         `json:"source_event_id"`
@@ -106,6 +123,8 @@ type NormalizedAlert struct {
 	ObservedAt      time.Time      `json:"observed_at"`
 }
 
+// AlertIngestResult summarises what happened when an alert was ingested.
+// Exactly one of CreatedIncident, Correlated, or Duplicate will be true.
 type AlertIngestResult struct {
 	Incident        Incident `json:"incident"`
 	Alert           Alert    `json:"alert"`
@@ -114,6 +133,9 @@ type AlertIngestResult struct {
 	Duplicate       bool     `json:"duplicate"`
 }
 
+// JIRALink records the mapping between an IncidentIQ incident and its
+// corresponding Jira issue. JIRAIssueID may be nil for links created before the
+// ID field was introduced.
 type JIRALink struct {
 	IncidentID   string    `json:"incident_id"`
 	JIRAIssueKey string    `json:"jira_issue_key"`

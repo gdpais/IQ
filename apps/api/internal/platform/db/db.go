@@ -1,3 +1,5 @@
+// Package db provides a thin wrapper around pgxpool to create a connection pool
+// with sensible defaults (max 8 connections, 30-second health check period).
 package db
 
 import (
@@ -8,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Open parses databaseURL, creates a connection pool, and verifies connectivity
+// with an initial ping. The caller must call pool.Close() when done.
 func Open(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {

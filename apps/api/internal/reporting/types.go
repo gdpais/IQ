@@ -1,3 +1,5 @@
+// Package reporting defines the data types and query logic for SRE, DORA, and
+// executive reports as well as deployment ingestion and snapshotting.
 package reporting
 
 import (
@@ -5,6 +7,7 @@ import (
 	"time"
 )
 
+// Filter constrains all reporting queries. Zero-value fields are ignored.
 type Filter struct {
 	Severity    string     `json:"severity"`
 	Service     string     `json:"service"`
@@ -15,6 +18,8 @@ type Filter struct {
 	To          *time.Time `json:"to"`
 }
 
+// LiveMetrics provides real-time operational statistics for the dashboard. MTTD,
+// MTTA, and MTTR are omitted from the JSON response when no data is available.
 type LiveMetrics struct {
 	IncidentCount             int64            `json:"incident_count"`
 	OpenIncidentCount         int64            `json:"open_incident_count"`
@@ -43,6 +48,9 @@ type SREReport struct {
 	GeneratedAt time.Time `json:"generated_at"`
 }
 
+// DORAReport exposes DORA (DevOps Research and Assessment) metrics derived from
+// deployments and linked incidents. ChangeFailureRate is the fraction of
+// deployments that coincided with an incident.
 type DORAReport struct {
 	DeploymentCount             int64     `json:"deployment_count"`
 	DeploymentLinkedIncidents   int64     `json:"deployment_linked_incidents"`
@@ -103,6 +111,9 @@ type SnapshotRequest struct {
 	Filter      Filter   `json:"filter"`
 }
 
+// ReportSnapshot is a materialised point-in-time copy of a report stored in
+// the database. Payload is kept as raw JSON so any report shape can be stored
+// without schema changes.
 type ReportSnapshot struct {
 	ID         string          `json:"id"`
 	ReportType string          `json:"report_type"`

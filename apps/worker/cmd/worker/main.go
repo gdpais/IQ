@@ -1,3 +1,8 @@
+// Package main is the IncidentIQ background worker. It polls the
+// integration_events table for pending Jira and Microsoft Teams tasks and
+// processes them with exponential-backoff retries (up to 5 attempts). The
+// worker also handles Teams OAuth2 token refresh and deduplicates channel
+// notifications via the incident_notification_deliveries table.
 package main
 
 import (
@@ -154,6 +159,7 @@ func main() {
 	close(processor.stopCh)
 }
 
+// worker holds the shared state for the poll-and-process loop.
 type worker struct {
 	cfg    config
 	db     *pgxpool.Pool
@@ -332,6 +338,9 @@ func (w *worker) processTeamsEvent(ctx context.Context, event integrationEvent) 
 	return w.completeIntegrationEvent(ctx, event.ID, mergePayload(event.Payload, map[string]any{"message_id": messageID}))
 }
 
+// retryOrFail either schedules an exponential-backoff retry (delay doubles per
+// attempt, capped at 2^5 = 32 minutes) or permanently fails the event once
+// maxAttempts is reached or retry is false.
 func (w *worker) retryOrFail(ctx context.Context, event integrationEvent, err error, retry bool) error {
 	payload := mergePayload(event.Payload, map[string]any{"error": err.Error()})
 	if !retry || event.Attempts >= maxAttempts {
@@ -341,6 +350,10 @@ func (w *worker) retryOrFail(ctx context.Context, event integrationEvent, err er
 	return w.retryIntegrationEvent(ctx, event.ID, payload, time.Now().UTC().Add(delay))
 }
 
+// claimPendingIntegrationEvents selects up to limit pending events for the
+// given integration using SELECT … FOR UPDATE SKIP LOCKED so concurrent worker
+// instances do not process the same event. It atomically transitions each
+// claimed row to status "processing" within the same transaction.
 func (w *worker) claimPendingIntegrationEvents(ctx context.Context, integration string, limit int) ([]integrationEvent, error) {
 	tx, err := w.db.Begin(ctx)
 	if err != nil {
@@ -561,6 +574,10 @@ func (w *worker) upsertTeamsAuthState(ctx context.Context, state teamsAuthState)
 	return err
 }
 
+// reserveTeamsDelivery attempts to insert a delivery record for the
+// (incident, channel, reason) tuple using INSERT … ON CONFLICT DO NOTHING.
+// It returns true only when the row was inserted, meaning this worker instance
+// won the race and should send the message.
 func (w *worker) reserveTeamsDelivery(ctx context.Context, incidentID string, channelID string, reason string, payload map[string]any) (bool, error) {
 	tag := fmt.Sprintf("%d", time.Now().UnixNano())
 	cmd, err := w.db.Exec(ctx, `
@@ -796,6 +813,9 @@ func (c *teamsClient) SendChannelMessage(ctx context.Context, state *teamsAuthSt
 	return out.ID, updated, nil
 }
 
+// accessToken returns a valid decrypted access token. If the stored token is
+// expired (or expiring within 2 minutes) it attempts a refresh via the
+// Microsoft identity platform and returns the updated state for persistence.
 func (c *teamsClient) accessToken(ctx context.Context, state *teamsAuthState) (string, *teamsAuthState, error) {
 	if state == nil {
 		return "", nil, fmt.Errorf("Teams integration is not connected")
@@ -962,6 +982,9 @@ func detailSummary(detail struct {
 	return text
 }
 
+// encrypt seals value using AES-256-GCM. The key is derived by SHA-256 hashing
+// secret so any key length is accepted. The nonce is prepended to the
+// ciphertext and the whole thing is base64-encoded for database storage.
 func encrypt(secret string, value string) (string, error) {
 	if value == "" {
 		return "", nil
@@ -1275,6 +1298,9 @@ func computeLiveMetrics(rows []reportMetricRow, _ time.Time) liveMetrics {
 	return out
 }
 
+// transientError reports whether err looks like a temporary network or server
+// problem that is worth retrying (HTTP 5xx, rate limit, timeout, connection
+// refused, etc.).
 func transientError(err error) bool {
 	if err == nil {
 		return false

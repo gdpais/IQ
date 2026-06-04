@@ -1,3 +1,7 @@
+// Package httpapi implements the IncidentIQ REST API. It wires together the
+// incident, reporting, Jira, Teams, and ticket-template sub-systems behind a
+// single http.ServeMux with CORS, bearer-token authentication, role-based
+// access control, and Redis-backed rate limiting.
 package httpapi
 
 import (
@@ -29,6 +33,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// Server is the HTTP API server. It holds shared service clients and owns the
+// request router. Use New to construct a ready-to-use Server.
 type Server struct {
 	cfg       config.Config
 	db        *pgxpool.Pool
@@ -43,6 +49,7 @@ type Server struct {
 
 var errInvalidWebhookSignature = errors.New("missing or invalid webhook signature")
 
+// New initialises a Server with all sub-system clients and registers routes.
 func New(cfg config.Config, db *pgxpool.Pool, redisClient *redis.Client) *Server {
 	s := &Server{
 		cfg:       cfg,
@@ -84,6 +91,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /exports/incidents.csv", s.handleIncidentsCSV)
 }
 
+// Handler returns the fully composed HTTP handler with middleware applied in
+// order: CORS → rate limit → role extraction → authorization → routing.
 func (s *Server) Handler() http.Handler {
 	return s.withCORS(s.withRateLimit(withRole(s.withAuthorization(s.mux))))
 }
@@ -152,6 +161,9 @@ func (s *Server) withRateLimit(next http.Handler) http.Handler {
 	})
 }
 
+// rateLimited increments a per-client, per-scope, per-minute counter in Redis
+// and reports whether the client has exceeded limit. The key expires after two
+// minutes to allow one-minute boundary edge cases to drain naturally.
 func (s *Server) rateLimited(ctx context.Context, scope string, client string, limit int) (bool, error) {
 	window := time.Now().UTC().Format("200601021504")
 	key := "incidentiq:rate:" + scope + ":" + client + ":" + window
@@ -905,6 +917,10 @@ func (s *Server) handleTeamsLookupTags(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// enqueueTeamsNotifications matches the incident against all configured Teams
+// routes and creates a pending integration_event for each distinct channel.
+// Recipients from multiple matching routes targeting the same channel are
+// deduplicated before enqueuing.
 func (s *Server) enqueueTeamsNotifications(ctx context.Context, incidentID string, reason incident.TeamsQueueReason) {
 	if !s.cfg.Teams.Enabled {
 		return
@@ -1236,6 +1252,10 @@ type jiraSyncResult struct {
 	Message string             `json:"message,omitempty"`
 }
 
+// syncIncidentToJIRA creates or updates the Jira issue linked to inc. On
+// transient API failures it enqueues a retryable integration event rather than
+// propagating the error to the caller, so the webhook response is not blocked
+// by Jira availability.
 func (s *Server) syncIncidentToJIRA(ctx context.Context, inc incident.Incident, reason string) (jiraSyncResult, error) {
 	status := s.jira.Status()
 	if !status.Enabled {
@@ -1313,6 +1333,9 @@ func (s *Server) enqueueJIRARetry(ctx context.Context, inc incident.Incident, ac
 	})
 }
 
+// auditAction appends a record to the audit_log table. It is a best-effort
+// call — callers propagate the error so the HTTP handler can return 500 rather
+// than silently dropping the audit entry.
 func (s *Server) auditAction(ctx context.Context, actor string, action string, resourceType string, resourceID string, metadata map[string]any) error {
 	if s.db == nil {
 		return nil
@@ -1361,6 +1384,9 @@ func decodeJSON(r *http.Request, out any) error {
 	return json.NewDecoder(r.Body).Decode(out)
 }
 
+// decodeSignedJSON reads the full request body, verifies the HMAC-SHA256
+// signature when a secret is configured, and unmarshals the JSON. The body is
+// limited to 2 MB to prevent memory exhaustion from oversized payloads.
 func decodeSignedJSON(r *http.Request, secret string, out any) error {
 	defer r.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(r.Body, 2*1024*1024))
@@ -1373,6 +1399,9 @@ func decodeSignedJSON(r *http.Request, secret string, out any) error {
 	return json.Unmarshal(body, out)
 }
 
+// validWebhookSignature checks the HMAC-SHA256 digest in any of the accepted
+// signature headers (X-IncidentIQ-Signature, X-Hub-Signature-256, X-Signature).
+// Comparison is done with hmac.Equal to avoid timing attacks.
 func validWebhookSignature(r *http.Request, secret string, body []byte) bool {
 	signature := firstHeaderValue(r, "X-IncidentIQ-Signature", "X-Hub-Signature-256", "X-Signature")
 	if signature == "" {
@@ -1408,6 +1437,8 @@ func validBearerToken(header string, expected string) bool {
 	return hmac.Equal([]byte(token), []byte(expected))
 }
 
+// clientIP resolves the real client address from X-Forwarded-For, X-Real-IP,
+// or the remote address, in that order. Used as the rate-limit key.
 func clientIP(r *http.Request) string {
 	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
 		first := strings.TrimSpace(strings.Split(forwarded, ",")[0])
@@ -1437,6 +1468,10 @@ func firstQueryValue(r *http.Request, names ...string) string {
 	return ""
 }
 
+// parseQueryTime reads the first non-empty query parameter matching names and
+// parses it as RFC3339 or YYYY-MM-DD. For upper-bound parameters (suffix "_to"
+// or "_before") a YYYY-MM-DD value is advanced by one day so the range is
+// exclusive-end.
 func parseQueryTime(r *http.Request, names ...string) (*time.Time, error) {
 	for _, name := range names {
 		value := r.URL.Query().Get(name)
@@ -1552,6 +1587,8 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// HealthCheck pings both the database and Redis and returns the first error
+// encountered. It is used by the /health/ready handler and in integration tests.
 func HealthCheck(ctx context.Context, db *pgxpool.Pool, redisClient *redis.Client) error {
 	if err := db.Ping(ctx); err != nil {
 		return err

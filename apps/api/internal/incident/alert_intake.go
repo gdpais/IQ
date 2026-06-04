@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+// Supported alert source identifiers. The generic source accepts any payload
+// that conforms to the documented field conventions.
 const (
 	AlertSourceDynatrace = "dynatrace"
 	AlertSourceELK       = "elk"
@@ -18,6 +20,10 @@ const (
 
 var errInvalidAlert = errors.New("invalid alert payload")
 
+// NormalizeAlert converts a raw webhook payload from the given source into a
+// source-agnostic NormalizedAlert. It fills in defaults for any missing fields
+// and generates a stable fingerprint for deduplication. now is injected to
+// allow deterministic testing.
 func NormalizeAlert(source string, payload map[string]any, now time.Time) (NormalizedAlert, error) {
 	source = strings.ToLower(strings.TrimSpace(source))
 	if source != AlertSourceDynatrace && source != AlertSourceELK && source != AlertSourceGeneric {
@@ -96,6 +102,9 @@ func normalizeGeneric(alert *NormalizedAlert, payload map[string]any) {
 	}
 }
 
+// RedactPayload returns a deep copy of payload with any values whose key
+// matches a sensitive pattern (password, token, secret, …) replaced by
+// "***REDACTED***". This sanitized copy is safe to store in the database.
 func RedactPayload(payload map[string]any) map[string]any {
 	out, ok := redactValue(payload).(map[string]any)
 	if !ok {
@@ -188,6 +197,9 @@ func firstTime(payload map[string]any, paths ...string) time.Time {
 	return time.Time{}
 }
 
+// valueAtPath resolves a dot-separated key path (e.g. "kibana.alert.uuid")
+// against a nested map. It first tries the full path as a literal key, then
+// descends into nested maps one segment at a time.
 func valueAtPath(payload map[string]any, path string) (any, bool) {
 	if value, ok := payload[path]; ok {
 		return value, true
@@ -221,6 +233,8 @@ func parseAlertTime(value string) time.Time {
 	return time.Time{}
 }
 
+// unixAlertTime converts a numeric epoch value to a UTC time. Values above
+// 1 000 000 000 000 are treated as milliseconds; smaller values as seconds.
 func unixAlertTime(value float64) time.Time {
 	if value <= 0 {
 		return time.Time{}
@@ -250,6 +264,9 @@ func normalizeToken(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
+// normalizeSeverity maps source-specific severity labels to the canonical set
+// used by IncidentIQ (critical, high, medium, low). Unrecognised values pass
+// through unchanged.
 func normalizeSeverity(value string) string {
 	value = normalizeToken(value)
 	switch value {

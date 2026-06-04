@@ -1,3 +1,6 @@
+// Package config loads and validates application configuration from environment
+// variables. All required fields are validated at startup so the binary fails
+// fast rather than at request time.
 package config
 
 import (
@@ -6,6 +9,7 @@ import (
 	"strconv"
 )
 
+// Config holds all runtime configuration for the API server.
 type Config struct {
 	Port               string
 	DBURL              string
@@ -22,6 +26,9 @@ type Config struct {
 	Webhooks           WebhookConfig
 }
 
+// JIRAConfig holds the connection parameters for the Jira integration.
+// Transition IDs map IncidentIQ status changes (open/acknowledged/resolved) to
+// the corresponding Jira workflow transitions.
 type JIRAConfig struct {
 	Enabled                 bool
 	BaseURL                 string
@@ -35,10 +42,13 @@ type JIRAConfig struct {
 	ResolutionValue         string
 }
 
+// SourceConfig toggles an optional inbound alert source (e.g. Dynatrace, ELK).
 type SourceConfig struct {
 	Enabled bool
 }
 
+// TeamsConfig holds OAuth2 credentials for the Microsoft Teams integration.
+// TokenEncryptionKey is used to AES-GCM encrypt OAuth tokens stored in the DB.
 type TeamsConfig struct {
 	Enabled            bool
 	TenantID           string
@@ -47,6 +57,9 @@ type TeamsConfig struct {
 	TokenEncryptionKey string
 }
 
+// WebhookConfig holds per-source HMAC shared secrets used to verify inbound
+// webhook payloads. An empty secret disables signature verification for that
+// source.
 type WebhookConfig struct {
 	DynatraceSecret  string
 	ELKSecret        string
@@ -56,11 +69,16 @@ type WebhookConfig struct {
 
 type WebhookSecrets = WebhookConfig
 
+// RateLimitConfig controls per-client request caps enforced via Redis sliding
+// windows. Zero disables rate limiting for that scope.
 type RateLimitConfig struct {
 	APIRequestsPerMinute     int
 	WebhookRequestsPerMinute int
 }
 
+// Load reads configuration from environment variables and validates required
+// fields. It returns an error if any mandatory value is missing or if an
+// integration is enabled without its required fields.
 func Load() (Config, error) {
 	cfg := Config{
 		Port:               getEnv("PORT", "8080"),
